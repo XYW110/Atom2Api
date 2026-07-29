@@ -19,6 +19,14 @@ interface OAuthState {
   status: 'pending' | 'complete' | 'expired';
 }
 
+interface ResetRefreshState {
+  resetAt: string;
+  retryAt: number;
+  inFlight: boolean;
+}
+
+const RESET_REFRESH_RETRY_MS = 15_000;
+
 function accountUsage(account: Account) {
   const visible = (account.plan.rate_limit_windows || []).filter((window) => window.show_enable === 1).sort((a, b) => a.window_size_seconds - b.window_size_seconds)[0];
   if (visible) return { percent: visible.usage_percent, label: `${visible.calls_used.toLocaleString()} / ${visible.call_limit.toLocaleString()} 次`, resetAt: visible.reset_at, secondsUntilReset: visible.seconds_until_reset };
@@ -46,9 +54,12 @@ function formatResetTime(value: string) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日${hour}点${minute}分`;
 }
 
+function resetTargetTime(resetAt: string, secondsUntilReset: number, snapshotAt: number) {
+  return parseResetTime(resetAt)?.getTime() ?? snapshotAt + Math.max(0, secondsUntilReset) * 1000;
+}
+
 function formatResetCountdown(resetAt: string, secondsUntilReset: number, snapshotAt: number, now: number) {
-  const parsedResetAt = parseResetTime(resetAt)?.getTime();
-  const target = parsedResetAt ?? snapshotAt + Math.max(0, secondsUntilReset) * 1000;
+  const target = resetTargetTime(resetAt, secondsUntilReset, snapshotAt);
   const remaining = Math.max(0, Math.ceil((target - now) / 1000));
   const hours = Math.floor(remaining / 3600);
   const minutes = Math.floor((remaining % 3600) / 60);
@@ -68,6 +79,7 @@ export default function AccountsPage() {
   const [snapshotAt, setSnapshotAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const oauthErrorNotified = useRef(false);
+  const resetRefreshState = useRef(new Map<string, ResetRefreshState>());
   const oauthModal = useDisclosure();
   const deleteModal = useDisclosure();
   const { showToast } = useToast();
@@ -93,6 +105,36 @@ export default function AccountsPage() {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const accountIDs = new Set(accounts.map((account) => account.id));
+    for (const accountID of resetRefreshState.current.keys()) {
+      if (!accountIDs.has(accountID)) resetRefreshState.current.delete(accountID);
+    }
+
+    for (const account of accounts) {
+      const usage = accountUsage(account);
+      if (!usage.resetAt || resetTargetTime(usage.resetAt, usage.secondsUntilReset, snapshotAt) > now) continue;
+
+      const refreshState = resetRefreshState.current.get(account.id);
+      const waitingToRetry = refreshState?.resetAt === usage.resetAt && (refreshState.inFlight || refreshState.retryAt > now);
+      if (waitingToRetry || busy === `sync:${account.id}`) continue;
+
+      resetRefreshState.current.set(account.id, { resetAt: usage.resetAt, retryAt: now + RESET_REFRESH_RETRY_MS, inFlight: true });
+      void apiFetch<Account>(`/api/accounts/${account.id}/sync`, jsonRequest('POST'))
+        .then((refreshedAccount) => {
+          const refreshedAt = Date.now();
+          setAccounts((current) => current.map((item) => item.id === refreshedAccount.id ? refreshedAccount : item));
+          setSnapshotAt(refreshedAt);
+          setNow(refreshedAt);
+        })
+        .catch(() => load())
+        .finally(() => {
+          const current = resetRefreshState.current.get(account.id);
+          if (current?.resetAt === usage.resetAt) resetRefreshState.current.set(account.id, { ...current, inFlight: false });
+        });
+    }
+  }, [accounts, busy, load, now, snapshotAt]);
 
   useEffect(() => {
     if (!oauth || oauth.status !== 'pending') return undefined;
