@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AlertCircle, Check, KeyRound, Network, Save, Settings2, ShieldAlert } from 'lucide-react';
-import { Button, Chip, Input, Skeleton } from '@heroui/react';
+import { AlertCircle, Bug, Check, KeyRound, Network, Save, Settings2, ShieldAlert } from 'lucide-react';
+import { Button, Chip, Input, Skeleton, Switch } from '@heroui/react';
 import { PageShell, StatusDot } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 import { apiFetch, type SettingsResponse, errorMessage, jsonRequest } from '../api';
 
-type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'request_timeout_seconds'>;
+type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds'>;
 
 const emptyForm: SettingsForm = {
-  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', request_timeout_seconds: 120,
+  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120,
 };
 
 export default function SettingsPage() {
@@ -32,6 +32,7 @@ export default function SettingsPage() {
         codingplan_api_url: response.codingplan_api_url,
         gateway_url: response.gateway_url,
         signer_url: response.signer_url,
+        audit_debug_enabled: response.audit_debug_enabled,
         request_timeout_seconds: response.request_timeout_seconds,
       });
       setError('');
@@ -80,7 +81,8 @@ export default function SettingsPage() {
   const isDirty = Boolean(settings) && (
     form.user_agent !== settings?.user_agent || form.platform_base_url !== settings?.platform_base_url ||
     form.codingplan_api_url !== settings?.codingplan_api_url || form.gateway_url !== settings?.gateway_url ||
-    form.signer_url !== settings?.signer_url || form.request_timeout_seconds !== settings?.request_timeout_seconds ||
+    form.signer_url !== settings?.signer_url || form.audit_debug_enabled !== settings?.audit_debug_enabled ||
+    form.request_timeout_seconds !== settings?.request_timeout_seconds ||
     Boolean(adminPassword) || Boolean(signerToken)
   );
 
@@ -98,6 +100,14 @@ export default function SettingsPage() {
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <div className="flex items-center gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600"><Settings2 size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">请求参数</h2><p className="mt-0.5 text-xs text-zinc-500">上游客户端标识与超时</p></div></div>
           <div className="grid gap-5 px-5 py-6 sm:grid-cols-[minmax(0,1fr)_220px] sm:px-6"><Input isRequired label="User-Agent" labelPlacement="outside" radius="sm" value={form.user_agent} classNames={{ input: 'font-mono text-sm' }} onValueChange={(value) => update('user_agent', value)} /><Input isRequired label="请求超时（秒）" labelPlacement="outside" max={600} min={5} radius="sm" type="number" value={String(form.request_timeout_seconds)} onValueChange={(value) => update('request_timeout_seconds', Number(value) || 0)} /></div>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+          <div className="flex items-center gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-700"><Bug size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">请求审计</h2><p className="mt-0.5 text-xs text-zinc-500">详细内容记录策略</p></div></div>
+          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div><p className="text-sm font-medium text-zinc-800">审计调试模式</p><p className="mt-1 text-xs leading-5 text-amber-700">完整内容可能包含提示词、代码和其他敏感数据</p></div>
+            <Switch aria-label="切换审计调试模式" color="primary" isSelected={form.audit_debug_enabled} onValueChange={(selected) => update('audit_debug_enabled', selected)}><span className="text-sm text-zinc-600">{form.audit_debug_enabled ? '已开启' : '已关闭'}</span></Switch>
+          </div>
         </section>
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">

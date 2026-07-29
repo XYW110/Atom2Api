@@ -22,7 +22,7 @@ func TestSettingsHandlers(t *testing.T) {
 		t.Fatalf("GET status = %d", getResponse.Code)
 	}
 
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"user_agent":"api-client/3.0"}`))
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"user_agent":"api-client/3.0","audit_debug_enabled":true}`))
 	updateRequest.Header.Set("Content-Type", "application/json")
 	updateResponse := httptest.NewRecorder()
 	handleUpdateSettings(manager).ServeHTTP(updateResponse, updateRequest)
@@ -34,11 +34,14 @@ func TestSettingsHandlers(t *testing.T) {
 	if err := json.Unmarshal(updateResponse.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode PUT response: %v", err)
 	}
-	if response.UserAgent != "api-client/3.0" {
-		t.Fatalf("PUT UserAgent = %q", response.UserAgent)
+	if response.UserAgent != "api-client/3.0" || !response.AuditDebugEnabled {
+		t.Fatalf("PUT response = %#v", response)
 	}
 	if got := manager.Snapshot().UserAgent; got != "api-client/3.0" {
 		t.Fatalf("runtime UserAgent = %q", got)
+	}
+	if !manager.Snapshot().AuditDebugEnabled {
+		t.Fatal("runtime AuditDebugEnabled = false")
 	}
 }
 

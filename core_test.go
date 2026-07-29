@@ -204,8 +204,8 @@ func TestProxyNonStreamingRewritesModelAndRecordsUsage(t *testing.T) {
 	if len(records) != 1 || records[0].InputTokens != 11 || records[0].OutputTokens != 7 || records[0].CachedTokens != 3 || records[0].AccountID != account.ID {
 		t.Fatalf("usage records = %#v", records)
 	}
-	if records[0].Method != http.MethodPost || records[0].RequestBody != `{"model":"gpt-test","messages":[{"role":"user","content":"hello"}]}` || records[0].ResponseBody != response.Body.String() {
-		t.Fatalf("audit content = %#v", records[0])
+	if records[0].Method != http.MethodPost || records[0].RequestBody != "" || records[0].ResponseBody != "" || len(records[0].RequestHeaders) != 0 || len(records[0].ResponseHeaders) != 0 {
+		t.Fatalf("audit debug details were recorded while disabled: %#v", records[0])
 	}
 	data, err := os.ReadFile(store.usagePath)
 	if err != nil || !bytes.Contains(data, []byte(`"input_tokens":11`)) {
@@ -252,8 +252,8 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 	if len(records) != 1 || !records[0].Streaming || records[0].InputTokens != 20 || records[0].OutputTokens != 4 {
 		t.Fatalf("stream usage = %#v", records)
 	}
-	if records[0].Method != http.MethodPost || records[0].RequestBody == "" || records[0].ResponseBody != response.Body.String() {
-		t.Fatalf("stream audit content = %#v", records[0])
+	if records[0].Method != http.MethodPost || records[0].RequestBody != "" || records[0].ResponseBody != "" {
+		t.Fatalf("stream audit debug details were recorded while disabled: %#v", records[0])
 	}
 	file, err := os.Open(store.usagePath)
 	if err != nil {
@@ -271,8 +271,10 @@ func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
 	record := UsageRecord{
 		ID: "req_audit_detail", Timestamp: now, Path: "/v1/chat/completions", Model: "gpt-audit",
 		Status: http.StatusOK, LatencyMS: 42, InputTokens: 5, OutputTokens: 7,
-		RequestBody:  `{"model":"gpt-audit","messages":[]}`,
-		ResponseBody: `{"id":"chatcmpl-audit","choices":[]}`,
+		RequestBody:     `{"model":"gpt-audit","messages":[]}`,
+		ResponseBody:    `{"id":"chatcmpl-audit","choices":[]}`,
+		RequestHeaders:  map[string][]string{"Content-Type": {"application/json"}},
+		ResponseHeaders: map[string][]string{"X-Request-Id": {"upstream-request"}},
 	}
 	if err := store.RecordUsage(record); err != nil {
 		t.Fatalf("RecordUsage: %v", err)
@@ -292,8 +294,10 @@ func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
 	if listResponse.Code != http.StatusOK {
 		t.Fatalf("list status = %d, body = %s", listResponse.Code, listResponse.Body.String())
 	}
-	if strings.Contains(listResponse.Body.String(), `"request_body":`) || strings.Contains(listResponse.Body.String(), `"response_body":`) || strings.Contains(listResponse.Body.String(), "chatcmpl-audit") {
-		t.Fatalf("audit list contains full body: %s", listResponse.Body.String())
+	if strings.Contains(listResponse.Body.String(), `"request_body":`) || strings.Contains(listResponse.Body.String(), `"response_body":`) ||
+		strings.Contains(listResponse.Body.String(), `"request_headers":`) || strings.Contains(listResponse.Body.String(), `"response_headers":`) ||
+		strings.Contains(listResponse.Body.String(), "chatcmpl-audit") || strings.Contains(listResponse.Body.String(), "upstream-request") {
+		t.Fatalf("audit list contains full details: %s", listResponse.Body.String())
 	}
 	var list auditListResponse
 	if err := json.Unmarshal(listResponse.Body.Bytes(), &list); err != nil {
@@ -314,7 +318,8 @@ func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
 	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode detail: %v", err)
 	}
-	if detail.Method != http.MethodPost || detail.RequestBody != record.RequestBody || detail.ResponseBody != record.ResponseBody {
+	if detail.Method != http.MethodPost || detail.RequestBody != record.RequestBody || detail.ResponseBody != record.ResponseBody ||
+		detail.RequestHeaders["Content-Type"][0] != "application/json" || detail.ResponseHeaders["X-Request-Id"][0] != "upstream-request" {
 		t.Fatalf("audit detail = %#v", detail)
 	}
 }

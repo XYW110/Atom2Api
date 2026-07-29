@@ -114,9 +114,10 @@ curl http://localhost:8080/v1/chat/completions \
 | `codingplan_api_url` | `https://api.gitcode.com/api/v5` | Coding Plan REST API |
 | `gateway_url` | `https://llm-api.atomgit.com/v1` | 默认 LLM 网关 |
 | `signer_url` | 空 | 可选外部签名服务；为空时使用内置 signer |
+| `audit_debug_enabled` | `false` | 开启后记录完整请求/响应正文及脱敏 Header |
 | `request_timeout_seconds` | `120` | 上游请求超时范围 5-600 秒 |
 
-主状态写入 `data_path`，请求明细以 NDJSON 追加到 `<data_path>.usage.ndjson`，内存和日志最多保留最近 50,000 条请求用于仪表盘聚合。
+主状态写入 `data_path`，请求明细以 NDJSON 追加到 `<data_path>.usage.ndjson`，内存和日志最多保留最近 50,000 条请求用于仪表盘聚合。默认只记录请求元数据与用量；开启审计调试模式后才保存请求/响应正文和 Header。无论调试模式是否开启，上游返回非 200 状态时都会保存其响应正文和 Header。认证、Cookie、Token、API Key 及签名 Header 的值会被脱敏。
 
 ## 签名兼容性
 
