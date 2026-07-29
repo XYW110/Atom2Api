@@ -62,6 +62,17 @@ function formatResetCountdown(resetAt: string, secondsUntilReset: number, snapsh
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+function ResetCountdown({ resetAt, secondsUntilReset, snapshotAt }: { resetAt: string; secondsUntilReset: number; snapshotAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return <span className="font-mono tabular-nums">距离重置{formatResetCountdown(resetAt, secondsUntilReset, snapshotAt, now)}</span>;
+}
+
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [query, setQuery] = useState('');
@@ -326,7 +337,7 @@ export default function AccountsPage() {
                     <TableRow key={account.id}>
                       <TableCell><div className="flex items-center gap-3">{account.user.avatar_url ? <img alt="" className="h-8 w-8 rounded-full bg-zinc-100 object-cover" src={account.user.avatar_url} /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">{account.name.slice(0, 2).toUpperCase()}</span>}<div><p className="font-medium text-zinc-900">{account.name}</p><p className="mt-0.5 text-xs text-zinc-400">@{account.user.username}</p></div></div></TableCell>
                       <TableCell><div><p className="font-medium text-zinc-800">{account.plan.codingplan_free?.plan_name || '未领取'}</p><p className="mt-0.5 text-xs text-zinc-400">{account.plan.codingplan_free ? `剩余 ${account.plan.codingplan_free.remaining_days} 天` : '—'}</p></div></TableCell>
-                      <TableCell><div className="min-w-[340px]"><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">{usage.label}</span><span className={usage.percent >= 90 ? 'text-red-600' : 'text-zinc-500'}>{usage.percent.toFixed(0)}%</span></div><Progress aria-label="额度使用率" color={usage.percent >= 90 ? 'danger' : usage.percent >= 70 ? 'warning' : 'primary'} size="sm" value={Math.min(usage.percent, 100)} />{usage.resetAt ? <div className="mt-1 flex items-center justify-between gap-4 whitespace-nowrap text-[11px] text-zinc-400"><span>下一次重置时间:{formatResetTime(usage.resetAt)}</span><span className="font-mono tabular-nums">距离重置{formatResetCountdown(usage.resetAt, usage.secondsUntilReset, snapshotAt, now)}</span></div> : <p className="mt-1 text-[11px] text-zinc-400">等待窗口刷新</p>}</div></TableCell>
+                      <TableCell><div className="min-w-[340px]"><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">{usage.label}</span><span className={usage.percent >= 90 ? 'text-red-600' : 'text-zinc-500'}>{usage.percent.toFixed(0)}%</span></div><Progress aria-label="额度使用率" color={usage.percent >= 90 ? 'danger' : usage.percent >= 70 ? 'warning' : 'primary'} size="sm" value={Math.min(usage.percent, 100)} />{usage.resetAt ? <div className="mt-1 flex items-center justify-between gap-4 whitespace-nowrap text-[11px] text-zinc-400"><span>下一次重置时间:{formatResetTime(usage.resetAt)}</span><ResetCountdown resetAt={usage.resetAt} secondsUntilReset={usage.secondsUntilReset} snapshotAt={snapshotAt} /></div> : <p className="mt-1 text-[11px] text-zinc-400">等待窗口刷新</p>}</div></TableCell>
                       <TableCell><span className="font-medium text-zinc-700">{account.models.length}</span></TableCell>
                       <TableCell><div><p className="font-medium text-zinc-800">{formatTokens(account.input_tokens + account.output_tokens)}</p><p className="mt-0.5 text-xs text-zinc-400">{account.request_count.toLocaleString()} 次请求</p></div></TableCell>
                       <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(account.last_sync_at)}</span></TableCell>
