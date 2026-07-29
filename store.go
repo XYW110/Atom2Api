@@ -132,17 +132,27 @@ func defaultPlanClaimSchedule() PlanClaimSchedule {
 	return PlanClaimSchedule{Enabled: true, Cron: defaultPlanClaimCron}
 }
 
+type CodingPlanClaimAttempt struct {
+	PlanType   string `json:"plan_type"`
+	HTTPStatus int    `json:"http_status"`
+	Response   string `json:"response"`
+	Success    bool   `json:"success"`
+	Duplicate  bool   `json:"duplicate"`
+	Message    string `json:"message,omitempty"`
+}
+
 type PlanClaimLog struct {
-	ID          string     `json:"id"`
-	AccountID   string     `json:"account_id"`
-	AccountName string     `json:"account_name"`
-	Trigger     string     `json:"trigger"`
-	Cron        string     `json:"cron,omitempty"`
-	Status      string     `json:"status"`
-	PlanName    string     `json:"plan_name,omitempty"`
-	Message     string     `json:"message,omitempty"`
-	StartedAt   time.Time  `json:"started_at"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	ID          string                   `json:"id"`
+	AccountID   string                   `json:"account_id"`
+	AccountName string                   `json:"account_name"`
+	Trigger     string                   `json:"trigger"`
+	Cron        string                   `json:"cron,omitempty"`
+	Status      string                   `json:"status"`
+	PlanName    string                   `json:"plan_name,omitempty"`
+	Message     string                   `json:"message,omitempty"`
+	Attempts    []CodingPlanClaimAttempt `json:"attempts,omitempty"`
+	StartedAt   time.Time                `json:"started_at"`
+	FinishedAt  *time.Time               `json:"finished_at,omitempty"`
 }
 
 type Account struct {

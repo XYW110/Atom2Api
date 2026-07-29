@@ -72,6 +72,15 @@ export interface PlanClaimSchedule {
   cron: string;
 }
 
+export interface CodingPlanClaimAttempt {
+  plan_type: 'Max' | 'Pro' | 'Lite';
+  http_status: number;
+  response: string;
+  success: boolean;
+  duplicate: boolean;
+  message?: string;
+}
+
 export interface PlanClaimLog {
   id: string;
   account_id: string;
@@ -81,6 +90,7 @@ export interface PlanClaimLog {
   status: 'running' | 'success' | 'failed';
   plan_name?: string;
   message?: string;
+  attempts?: CodingPlanClaimAttempt[];
   started_at: string;
   finished_at?: string;
 }

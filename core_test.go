@@ -140,12 +140,19 @@ func TestCodingPlanClaimCascadeAndSync(t *testing.T) {
 		t.Fatalf("clear account: %v", err)
 	}
 	client := NewCodingPlanClient(config, store)
-	view, err := client.ClaimAndSync(context.Background(), account.ID)
+	outcome, err := client.ClaimAndSyncDetailed(context.Background(), account.ID)
 	if err != nil {
-		t.Fatalf("ClaimAndSync: %v", err)
+		t.Fatalf("ClaimAndSyncDetailed: %v", err)
 	}
+	view := outcome.Account
 	if got := strings.Join(claimTiers, ","); got != "Max,Pro" {
 		t.Fatalf("claim tiers = %q", got)
+	}
+	if len(outcome.Attempts) != 2 || outcome.Attempts[0].PlanType != "Max" || outcome.Attempts[0].Message != "not eligible" || outcome.Attempts[0].HTTPStatus != http.StatusOK {
+		t.Fatalf("claim attempts = %#v", outcome.Attempts)
+	}
+	if !outcome.Attempts[1].Success || outcome.Attempts[1].PlanType != "Pro" || !strings.Contains(outcome.Attempts[1].Response, `"success":true`) {
+		t.Fatalf("successful claim attempt = %#v", outcome.Attempts[1])
 	}
 	if view.Plan.Plan == nil || view.Plan.Plan.PlanName != "CodingPlan Pro" {
 		t.Fatalf("plan = %#v", view.Plan.Plan)

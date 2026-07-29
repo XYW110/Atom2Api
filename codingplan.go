@@ -21,6 +21,13 @@ type codingPlanClaimResponse struct {
 	PlanType  string `json:"plan_type"`
 }
 
+type CodingPlanClaimOutcome struct {
+	Account  AccountView
+	Attempts []CodingPlanClaimAttempt
+	PlanName string
+	Message  string
+}
+
 type CodingPlanClient struct {
 	config *ConfigManager
 	store  *Store
@@ -37,32 +44,42 @@ func (c *CodingPlanClient) SetOAuthManager(oauth *OAuthManager) {
 }
 
 func (c *CodingPlanClient) ClaimAndSync(ctx context.Context, accountID string) (AccountView, error) {
+	outcome, err := c.ClaimAndSyncDetailed(ctx, accountID)
+	return outcome.Account, err
+}
+
+func (c *CodingPlanClient) ClaimAndSyncDetailed(ctx context.Context, accountID string) (CodingPlanClaimOutcome, error) {
+	var outcome CodingPlanClaimOutcome
 	account, token, _, err := c.store.Account(accountID)
 	if err != nil {
-		return AccountView{}, err
+		return outcome, err
 	}
 	if c.oauth != nil {
 		token, err = c.oauth.Refresh(ctx, accountID)
 		if err != nil {
-			return AccountView{}, err
+			return outcome, err
 		}
 	}
 
-	if _, err = c.claim(ctx, token); err != nil {
-		return AccountView{}, err
+	claimResponse, attempts, err := c.claim(ctx, token)
+	outcome.Attempts = attempts
+	outcome.PlanName = claimResponse.PlanName
+	outcome.Message = claimResponse.Message
+	if err != nil {
+		return outcome, err
 	}
 	status, err := c.fetchStatus(ctx, token)
 	if err != nil {
-		return AccountView{}, err
+		return outcome, err
 	}
 	tier := planTier(status.Plan)
 	models, err := c.fetchModels(ctx, token, tier)
 	if err != nil {
-		return AccountView{}, err
+		return outcome, err
 	}
 	usage, usageErr := c.fetchUsage(ctx, token)
 	now := time.Now().UTC()
-	view, err := c.store.UpdateAccount(account.ID, func(stored *Account) error {
+	outcome.Account, err = c.store.UpdateAccount(account.ID, func(stored *Account) error {
 		stored.Plan = status
 		stored.Models = models
 		stored.ProviderUsage = usage
@@ -74,7 +91,10 @@ func (c *CodingPlanClient) ClaimAndSync(ctx context.Context, accountID string) (
 		}
 		return nil
 	})
-	return view, err
+	if outcome.Account.Plan.Plan != nil {
+		outcome.PlanName = outcome.Account.Plan.Plan.PlanName
+	}
+	return outcome, err
 }
 
 func (c *CodingPlanClient) Sync(ctx context.Context, accountID string) (AccountView, error) {
@@ -112,17 +132,29 @@ func (c *CodingPlanClient) Sync(ctx context.Context, accountID string) (AccountV
 	})
 }
 
-func (c *CodingPlanClient) claim(ctx context.Context, token string) (codingPlanClaimResponse, error) {
+func (c *CodingPlanClient) claim(ctx context.Context, token string) (codingPlanClaimResponse, []CodingPlanClaimAttempt, error) {
 	var last string
+	attempts := make([]CodingPlanClaimAttempt, 0, 3)
 	for _, tier := range []string{"Max", "Pro", "Lite"} {
 		var response codingPlanClaimResponse
-		err := c.request(ctx, http.MethodPost, "/coding-plan/claim-v2", token, map[string]string{"plan_type": tier}, &response)
+		httpStatus, rawResponse, err := c.request(ctx, http.MethodPost, "/coding-plan/claim-v2", token, map[string]string{"plan_type": tier}, &response)
+		if err != nil && len(rawResponse) > 0 {
+			_ = json.Unmarshal(rawResponse, &response)
+		}
+		message := response.Message
+		if message == "" && err != nil {
+			message = err.Error()
+		}
+		attempts = append(attempts, CodingPlanClaimAttempt{
+			PlanType: tier, HTTPStatus: httpStatus, Response: string(rawResponse),
+			Success: err == nil && response.Success, Duplicate: err == nil && response.Duplicate, Message: message,
+		})
 		if err != nil {
-			last = err.Error()
+			last = message
 			continue
 		}
 		if response.Success || response.Duplicate {
-			return response, nil
+			return response, attempts, nil
 		}
 		if response.Message != "" {
 			last = response.Message
@@ -131,19 +163,19 @@ func (c *CodingPlanClient) claim(ctx context.Context, token string) (codingPlanC
 	if last == "" {
 		last = "no Coding Plan tier is currently available"
 	}
-	return codingPlanClaimResponse{}, errors.New(last)
+	return codingPlanClaimResponse{}, attempts, errors.New(last)
 }
 
 func (c *CodingPlanClient) fetchStatus(ctx context.Context, token string) (CodingPlanStatus, error) {
 	var status CodingPlanStatus
-	err := c.request(ctx, http.MethodGet, "/coding-plan/status-v2", token, nil, &status)
+	_, _, err := c.request(ctx, http.MethodGet, "/coding-plan/status-v2", token, nil, &status)
 	return status, err
 }
 
 func (c *CodingPlanClient) fetchModels(ctx context.Context, token, tier string) ([]CodingPlanModel, error) {
 	var models []CodingPlanModel
 	path := "/coding-plan/models-v2?plan_type=" + url.QueryEscape(tier)
-	if err := c.request(ctx, http.MethodGet, path, token, nil, &models); err != nil {
+	if _, _, err := c.request(ctx, http.MethodGet, path, token, nil, &models); err != nil {
 		return nil, err
 	}
 	config := c.config.Snapshot()
@@ -168,19 +200,19 @@ func (c *CodingPlanClient) fetchModels(ctx context.Context, token, tier string) 
 
 func (c *CodingPlanClient) fetchUsage(ctx context.Context, token string) (*ProviderUsage, error) {
 	var usage ProviderUsage
-	if err := c.request(ctx, http.MethodGet, "/coding-plan/usage", token, nil, &usage); err != nil {
+	if _, _, err := c.request(ctx, http.MethodGet, "/coding-plan/usage", token, nil, &usage); err != nil {
 		return nil, err
 	}
 	return &usage, nil
 }
 
-func (c *CodingPlanClient) request(ctx context.Context, method, path, token string, body, result any) error {
+func (c *CodingPlanClient) request(ctx context.Context, method, path, token string, body, result any) (int, []byte, error) {
 	base := strings.TrimRight(c.config.Snapshot().CodingPlanAPIURL, "/")
 	var encodedBody []byte
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, nil, err
 		}
 		encodedBody = encoded
 	}
@@ -193,7 +225,7 @@ func (c *CodingPlanClient) request(ctx context.Context, method, path, token stri
 		}
 		request, requestErr := http.NewRequestWithContext(ctx, method, base+path, reader)
 		if requestErr != nil {
-			return requestErr
+			return 0, nil, requestErr
 		}
 		request.Header.Set("Authorization", "Bearer "+token)
 		request.Header.Set("Accept", "application/json")
@@ -210,23 +242,23 @@ func (c *CodingPlanClient) request(ctx context.Context, method, path, token stri
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("Coding Plan request failed: %w", err)
+		return 0, nil, fmt.Errorf("Coding Plan request failed: %w", err)
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	if err != nil {
-		return err
+		return response.StatusCode, data, err
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("Coding Plan authentication failed (%d); reconnect the account", response.StatusCode)
+		return response.StatusCode, data, fmt.Errorf("Coding Plan authentication failed (%d); reconnect the account", response.StatusCode)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("Coding Plan returned %d: %s", response.StatusCode, compactError(data))
+		return response.StatusCode, data, fmt.Errorf("Coding Plan returned %d: %s", response.StatusCode, compactError(data))
 	}
 	if err := json.Unmarshal(data, result); err != nil {
-		return fmt.Errorf("decode Coding Plan response: %w", err)
+		return response.StatusCode, data, fmt.Errorf("decode Coding Plan response: %w", err)
 	}
-	return nil
+	return response.StatusCode, data, nil
 }
 
 func planTier(plan *PlanInfo) string {

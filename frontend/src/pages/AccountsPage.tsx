@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, CheckCircle2, Copy, ExternalLink, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
@@ -73,6 +73,42 @@ function ResetCountdown({ resetAt, secondsUntilReset, snapshotAt }: { resetAt: s
   return <span className="font-mono tabular-nums">距离重置{formatResetCountdown(resetAt, secondsUntilReset, snapshotAt, now)}</span>;
 }
 
+function ClaimLogDetails({ log }: { log: PlanClaimLog }) {
+  const attempts = log.attempts || [];
+  const rawRecords = attempts.map(({ plan_type, http_status, response }) => ({ plan_type, http_status, response }));
+
+  return (
+    <div className="space-y-6 px-6 pb-2">
+      <dl className="grid gap-4 border-b border-zinc-100 pb-5 sm:grid-cols-4">
+        <div><dt className="text-xs text-zinc-400">触发方式</dt><dd className="mt-1 text-sm font-medium text-zinc-800">{log.trigger === 'scheduled' ? '定时' : '手动'}</dd></div>
+        <div><dt className="text-xs text-zinc-400">领取结果</dt><dd className="mt-1 text-sm font-medium text-zinc-800">{log.status === 'success' ? '成功' : log.status === 'failed' ? '失败' : '进行中'}</dd></div>
+        <div><dt className="text-xs text-zinc-400">最终套餐</dt><dd className="mt-1 text-sm font-medium text-zinc-800">{log.plan_name || '—'}</dd></div>
+        <div><dt className="text-xs text-zinc-400">开始时间</dt><dd className="mt-1 whitespace-nowrap text-sm text-zinc-600">{formatDateTime(log.started_at)}</dd></div>
+      </dl>
+
+      <section>
+        <h3 className="mb-3 text-sm font-semibold text-zinc-900">套餐领取明细</h3>
+        {attempts.length > 0 ? (
+          <div className="overflow-hidden rounded-md border border-zinc-200">
+            <Table aria-label="套餐领取明细" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3 text-sm align-top' }}>
+              <TableHeader><TableColumn>套餐</TableColumn><TableColumn>结果</TableColumn><TableColumn>HTTP</TableColumn><TableColumn>消息</TableColumn></TableHeader>
+              <TableBody items={attempts}>{(attempt) => {
+                const result = attempt.success ? { label: '成功', color: 'success' as const } : attempt.duplicate ? { label: '已领取', color: 'primary' as const } : { label: '失败', color: 'danger' as const };
+                return <TableRow key={attempt.plan_type}><TableCell><span className="font-semibold text-zinc-800">{attempt.plan_type}</span></TableCell><TableCell><Chip color={result.color} radius="sm" size="sm" variant="flat">{result.label}</Chip></TableCell><TableCell><span className="font-mono text-xs text-zinc-600">{attempt.http_status || '无响应'}</span></TableCell><TableCell><p className="max-w-xl whitespace-pre-wrap break-words text-xs leading-5 text-zinc-600">{attempt.message || '—'}</p></TableCell></TableRow>;
+              }}</TableBody>
+            </Table>
+          </div>
+        ) : <p className="text-sm text-zinc-500">{log.message || '暂无逐档记录'}</p>}
+      </section>
+
+      <section>
+        <h3 className="mb-3 text-sm font-semibold text-zinc-900">原始记录</h3>
+        <pre className="max-h-80 overflow-auto rounded-md bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">{attempts.length > 0 ? JSON.stringify(rawRecords, null, 2) : '[]'}</pre>
+      </section>
+    </div>
+  );
+}
+
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [query, setQuery] = useState('');
@@ -88,6 +124,7 @@ export default function AccountsPage() {
   const [editCron, setEditCron] = useState('0 10 * * *');
   const [logAccount, setLogAccount] = useState<Account | null>(null);
   const [claimLogs, setClaimLogs] = useState<PlanClaimLog[]>([]);
+  const [selectedClaimLog, setSelectedClaimLog] = useState<PlanClaimLog | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [snapshotAt, setSnapshotAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
@@ -268,6 +305,7 @@ export default function AccountsPage() {
   const openClaimLogs = async (account: Account) => {
     setLogAccount(account);
     setClaimLogs([]);
+    setSelectedClaimLog(null);
     setLogsLoading(true);
     logsModal.onOpen();
     try {
@@ -363,7 +401,7 @@ export default function AccountsPage() {
       </Modal>
 
       <Modal isOpen={logsModal.isOpen} radius="sm" scrollBehavior="inside" size="4xl" onOpenChange={logsModal.onOpenChange}>
-        <ModalContent>{(onClose) => <><ModalHeader>{logAccount ? `“${logAccount.name}”领取记录` : '领取记录'}</ModalHeader><ModalBody className="px-0">{logsLoading ? <div className="space-y-3 px-6 py-2">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}</div> : <Table aria-label="Coding Plan 领取记录" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3 text-sm' }}><TableHeader><TableColumn>触发方式</TableColumn><TableColumn>结果</TableColumn><TableColumn>套餐</TableColumn><TableColumn>开始时间</TableColumn><TableColumn>详情</TableColumn></TableHeader><TableBody items={claimLogs} emptyContent="暂无领取记录">{(claimLog) => <TableRow key={claimLog.id}><TableCell><Chip color={claimLog.trigger === 'scheduled' ? 'primary' : 'default'} radius="sm" size="sm" variant="flat">{claimLog.trigger === 'scheduled' ? '定时' : '手动'}</Chip></TableCell><TableCell><Chip color={claimLog.status === 'success' ? 'success' : claimLog.status === 'failed' ? 'danger' : 'warning'} radius="sm" size="sm" variant="flat">{claimLog.status === 'success' ? '成功' : claimLog.status === 'failed' ? '失败' : '进行中'}</Chip></TableCell><TableCell><span className="whitespace-nowrap text-zinc-700">{claimLog.plan_name || '—'}</span></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(claimLog.started_at)}</span></TableCell><TableCell><p className="max-w-96 truncate text-xs text-zinc-500" title={claimLog.message}>{claimLog.message || '—'}</p></TableCell></TableRow>}</TableBody></Table>}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>关闭</Button></ModalFooter></>}</ModalContent>
+        <ModalContent>{(onClose) => <><ModalHeader className="flex items-center gap-2">{selectedClaimLog ? <Tooltip content="返回领取记录"><Button isIconOnly aria-label="返回领取记录" radius="sm" size="sm" variant="light" onPress={() => setSelectedClaimLog(null)}><ArrowLeft size={17} /></Button></Tooltip> : null}<span>{selectedClaimLog ? '领取详情' : logAccount ? `“${logAccount.name}”领取记录` : '领取记录'}</span></ModalHeader><ModalBody className="px-0">{selectedClaimLog ? <ClaimLogDetails log={selectedClaimLog} /> : logsLoading ? <div className="space-y-3 px-6 py-2">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}</div> : <Table aria-label="Coding Plan 领取记录" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3 text-sm' }}><TableHeader><TableColumn>触发方式</TableColumn><TableColumn>结果</TableColumn><TableColumn>套餐</TableColumn><TableColumn>开始时间</TableColumn><TableColumn>消息</TableColumn><TableColumn align="end">详情</TableColumn></TableHeader><TableBody items={claimLogs} emptyContent="暂无领取记录">{(claimLog) => <TableRow key={claimLog.id}><TableCell><Chip color={claimLog.trigger === 'scheduled' ? 'primary' : 'default'} radius="sm" size="sm" variant="flat">{claimLog.trigger === 'scheduled' ? '定时' : '手动'}</Chip></TableCell><TableCell><Chip color={claimLog.status === 'success' ? 'success' : claimLog.status === 'failed' ? 'danger' : 'warning'} radius="sm" size="sm" variant="flat">{claimLog.status === 'success' ? '成功' : claimLog.status === 'failed' ? '失败' : '进行中'}</Chip></TableCell><TableCell><span className="whitespace-nowrap text-zinc-700">{claimLog.plan_name || '—'}</span></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(claimLog.started_at)}</span></TableCell><TableCell><p className="max-w-72 truncate text-xs text-zinc-500" title={claimLog.message}>{claimLog.message || '—'}</p></TableCell><TableCell><Tooltip content="查看领取详情"><Button isIconOnly aria-label="查看领取详情" radius="sm" size="sm" variant="light" onPress={() => setSelectedClaimLog(claimLog)}><Eye size={16} /></Button></Tooltip></TableCell></TableRow>}</TableBody></Table>}</ModalBody><ModalFooter>{selectedClaimLog ? <Button radius="sm" variant="light" onPress={() => setSelectedClaimLog(null)}>返回</Button> : null}<Button radius="sm" variant="light" onPress={onClose}>关闭</Button></ModalFooter></>}</ModalContent>
       </Modal>
 
       <Modal isOpen={deleteModal.isOpen} radius="sm" size="sm" onOpenChange={deleteModal.onOpenChange}>

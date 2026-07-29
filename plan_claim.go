@@ -20,7 +20,7 @@ const (
 var errPlanClaimInProgress = errors.New("Coding Plan claim is already in progress for this account")
 
 type codingPlanClaimer interface {
-	ClaimAndSync(context.Context, string) (AccountView, error)
+	ClaimAndSyncDetailed(context.Context, string) (CodingPlanClaimOutcome, error)
 }
 
 type PlanClaimResult struct {
@@ -133,10 +133,14 @@ func (s *PlanClaimService) Claim(ctx context.Context, accountID, trigger string)
 	if err != nil {
 		return PlanClaimResult{}, err
 	}
-	view, claimErr := s.claimer.ClaimAndSync(ctx, accountID)
+	outcome, claimErr := s.claimer.ClaimAndSyncDetailed(ctx, accountID)
+	view := outcome.Account
 	status := "success"
-	message := "Coding Plan claimed and synchronized"
-	planName := ""
+	message := outcome.Message
+	if message == "" {
+		message = "Coding Plan claimed and synchronized"
+	}
+	planName := outcome.PlanName
 	if view.Plan.Plan != nil {
 		planName = view.Plan.Plan.PlanName
 	}
@@ -144,7 +148,7 @@ func (s *PlanClaimService) Claim(ctx context.Context, accountID, trigger string)
 		status = "failed"
 		message = claimErr.Error()
 	}
-	claimLog, logErr := s.store.FinishPlanClaimLog(claimLog.ID, status, planName, message)
+	claimLog, logErr := s.store.FinishPlanClaimLog(claimLog.ID, status, planName, message, outcome.Attempts)
 	result := PlanClaimResult{Account: view, Log: claimLog}
 	if claimErr != nil {
 		if logErr != nil {
@@ -191,7 +195,7 @@ func (s *Store) StartPlanClaimLog(accountID, accountName, trigger, expression st
 	return claimLog, nil
 }
 
-func (s *Store) FinishPlanClaimLog(id, status, planName, message string) (PlanClaimLog, error) {
+func (s *Store) FinishPlanClaimLog(id, status, planName, message string, attempts []CodingPlanClaimAttempt) (PlanClaimLog, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.state.PlanClaimLogs {
@@ -202,6 +206,7 @@ func (s *Store) FinishPlanClaimLog(id, status, planName, message string) (PlanCl
 		s.state.PlanClaimLogs[i].Status = status
 		s.state.PlanClaimLogs[i].PlanName = planName
 		s.state.PlanClaimLogs[i].Message = message
+		s.state.PlanClaimLogs[i].Attempts = append([]CodingPlanClaimAttempt(nil), attempts...)
 		s.state.PlanClaimLogs[i].FinishedAt = &now
 		if err := s.saveLocked(); err != nil {
 			return PlanClaimLog{}, err
