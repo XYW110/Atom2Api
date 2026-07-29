@@ -24,6 +24,7 @@ export interface RateLimitWindow {
   calls_used: number;
   usage_percent: number;
   quota_exhausted: boolean;
+  reset_at: string;
   reset_at_display: string;
   seconds_until_reset: number;
   usage_status_desc: string;
@@ -34,6 +35,7 @@ export interface CurrentUsage {
   window_tokens_used: number;
   usage_percent: number;
   window_hours: number;
+  reset_at: string;
   reset_at_display: string;
   seconds_until_reset: number;
   usage_status_desc: string;

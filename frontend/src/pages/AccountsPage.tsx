@@ -21,10 +21,39 @@ interface OAuthState {
 
 function accountUsage(account: Account) {
   const visible = (account.plan.rate_limit_windows || []).filter((window) => window.show_enable === 1).sort((a, b) => a.window_size_seconds - b.window_size_seconds)[0];
-  if (visible) return { percent: visible.usage_percent, label: `${visible.calls_used.toLocaleString()} / ${visible.call_limit.toLocaleString()} 次`, reset: visible.reset_at_display };
+  if (visible) return { percent: visible.usage_percent, label: `${visible.calls_used.toLocaleString()} / ${visible.call_limit.toLocaleString()} 次`, resetAt: visible.reset_at, secondsUntilReset: visible.seconds_until_reset };
   const current = account.plan.current_usage;
-  if (current) return { percent: current.usage_percent, label: `${formatTokens(current.window_tokens_used)} / ${formatTokens(current.window_token_limit)} tokens`, reset: current.reset_at_display };
-  return { percent: 0, label: '等待额度数据', reset: '' };
+  if (current) return { percent: current.usage_percent, label: `${formatTokens(current.window_tokens_used)} / ${formatTokens(current.window_token_limit)} tokens`, resetAt: current.reset_at, secondsUntilReset: current.seconds_until_reset };
+  return { percent: 0, label: '等待额度数据', resetAt: '', secondsUntilReset: 0 };
+}
+
+function parseResetTime(value: string) {
+  const localMatch = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/.exec(value.trim());
+  if (localMatch) {
+    const [, year, month, day, hour, minute, second = '0'] = localMatch;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatResetTime(value: string) {
+  const date = parseResetTime(value);
+  if (!date) return '';
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日${hour}点${minute}分`;
+}
+
+function formatResetCountdown(resetAt: string, secondsUntilReset: number, snapshotAt: number, now: number) {
+  const parsedResetAt = parseResetTime(resetAt)?.getTime();
+  const target = parsedResetAt ?? snapshotAt + Math.max(0, secondsUntilReset) * 1000;
+  const remaining = Math.max(0, Math.ceil((target - now) / 1000));
+  const hours = Math.floor(remaining / 3600);
+  const minutes = Math.floor((remaining % 3600) / 60);
+  const seconds = remaining % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 export default function AccountsPage() {
@@ -36,6 +65,8 @@ export default function AccountsPage() {
   const [oauth, setOAuth] = useState<OAuthState | null>(null);
   const [oauthCopied, setOAuthCopied] = useState(false);
   const [deleting, setDeleting] = useState<Account | null>(null);
+  const [snapshotAt, setSnapshotAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const oauthErrorNotified = useRef(false);
   const oauthModal = useDisclosure();
   const deleteModal = useDisclosure();
@@ -44,7 +75,10 @@ export default function AccountsPage() {
   const load = useCallback(async () => {
     try {
       const response = await apiFetch<{ data: Account[] }>('/api/accounts');
+      const loadedAt = Date.now();
       setAccounts(response.data || []);
+      setSnapshotAt(loadedAt);
+      setNow(loadedAt);
       setError('');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '无法加载账号');
@@ -54,6 +88,11 @@ export default function AccountsPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!oauth || oauth.status !== 'pending') return undefined;
@@ -195,7 +234,7 @@ export default function AccountsPage() {
                     <TableRow key={account.id}>
                       <TableCell><div className="flex items-center gap-3">{account.user.avatar_url ? <img alt="" className="h-8 w-8 rounded-full bg-zinc-100 object-cover" src={account.user.avatar_url} /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">{account.name.slice(0, 2).toUpperCase()}</span>}<div><p className="font-medium text-zinc-900">{account.name}</p><p className="mt-0.5 text-xs text-zinc-400">@{account.user.username}</p></div></div></TableCell>
                       <TableCell><div><p className="font-medium text-zinc-800">{account.plan.codingplan_free?.plan_name || '未领取'}</p><p className="mt-0.5 text-xs text-zinc-400">{account.plan.codingplan_free ? `剩余 ${account.plan.codingplan_free.remaining_days} 天` : '—'}</p></div></TableCell>
-                      <TableCell><div className="min-w-40"><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">{usage.label}</span><span className={usage.percent >= 90 ? 'text-red-600' : 'text-zinc-500'}>{usage.percent.toFixed(0)}%</span></div><Progress aria-label="额度使用率" color={usage.percent >= 90 ? 'danger' : usage.percent >= 70 ? 'warning' : 'primary'} size="sm" value={Math.min(usage.percent, 100)} /><p className="mt-1 text-[11px] text-zinc-400">{usage.reset || '等待窗口刷新'}</p></div></TableCell>
+                      <TableCell><div className="min-w-[340px]"><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">{usage.label}</span><span className={usage.percent >= 90 ? 'text-red-600' : 'text-zinc-500'}>{usage.percent.toFixed(0)}%</span></div><Progress aria-label="额度使用率" color={usage.percent >= 90 ? 'danger' : usage.percent >= 70 ? 'warning' : 'primary'} size="sm" value={Math.min(usage.percent, 100)} />{usage.resetAt ? <div className="mt-1 flex items-center justify-between gap-4 whitespace-nowrap text-[11px] text-zinc-400"><span>下一次重置时间:{formatResetTime(usage.resetAt)}</span><span className="font-mono tabular-nums">距离重置{formatResetCountdown(usage.resetAt, usage.secondsUntilReset, snapshotAt, now)}</span></div> : <p className="mt-1 text-[11px] text-zinc-400">等待窗口刷新</p>}</div></TableCell>
                       <TableCell><span className="font-medium text-zinc-700">{account.models.length}</span></TableCell>
                       <TableCell><div><p className="font-medium text-zinc-800">{formatTokens(account.input_tokens + account.output_tokens)}</p><p className="mt-0.5 text-xs text-zinc-400">{account.request_count.toLocaleString()} 次请求</p></div></TableCell>
                       <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(account.last_sync_at)}</span></TableCell>
