@@ -114,9 +114,10 @@ curl http://localhost:8080/v1/chat/completions \
 | `codingplan_api_url` | `https://api.gitcode.com/api/v5` | Coding Plan REST API |
 | `gateway_url` | `https://llm-api.atomgit.com/v1` | Default LLM gateway |
 | `signer_url` | Empty | Optional external signing service; the built-in signer is used when empty |
+| `audit_debug_enabled` | `false` | Records full request/response bodies and sanitized headers when enabled |
 | `request_timeout_seconds` | `120` | Upstream request timeout, from 5 to 600 seconds |
 
-Primary state is written to `data_path`. Request records are appended to `<data_path>.usage.ndjson`, and both memory and the log retain at most the latest 50,000 requests for dashboard aggregation.
+Primary state is written to `data_path`. Request records are appended to `<data_path>.usage.ndjson`, and both memory and the log retain at most the latest 50,000 requests for dashboard aggregation. By default only request metadata and usage are retained. Full bodies and headers are stored only when audit debug mode is enabled. Upstream responses with a non-200 status are retained regardless of that setting. Authentication, cookie, token, API key, and signature header values are redacted.
 
 ## Signing Compatibility
 

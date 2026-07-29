@@ -6,5 +6,6 @@
   "platform_base_url": "https://acs.atomgit.com",
   "codingplan_api_url": "https://api.gitcode.com/api/v5",
   "gateway_url": "https://llm-api.atomgit.com/v1",
+  "audit_debug_enabled": false,
   "request_timeout_seconds": 120
 }

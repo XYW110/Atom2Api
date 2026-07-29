@@ -38,8 +38,9 @@ type tokenUsage struct {
 
 type auditResponseWriter struct {
 	http.ResponseWriter
-	status int
-	body   bytes.Buffer
+	status      int
+	captureBody bool
+	body        bytes.Buffer
 }
 
 func (w *auditResponseWriter) WriteHeader(status int) {
@@ -55,7 +56,7 @@ func (w *auditResponseWriter) Write(data []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	written, err := w.ResponseWriter.Write(data)
-	if written > 0 {
+	if written > 0 && w.captureBody {
 		_, _ = w.body.Write(data[:written])
 	}
 	return written, err
@@ -106,10 +107,14 @@ func (p *Proxy) HandleModels(w http.ResponseWriter, _ *http.Request, _ APIKey) {
 
 func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey) {
 	started := time.Now()
-	captured := &auditResponseWriter{ResponseWriter: w}
+	debugEnabled := p.config.Snapshot().AuditDebugEnabled
+	captured := &auditResponseWriter{ResponseWriter: w, captureBody: debugEnabled}
 	w = captured
 	audit := UsageRecord{
 		Timestamp: started.UTC(), Method: r.Method, Path: r.URL.Path, APIKeyID: key.ID,
+	}
+	if debugEnabled {
+		audit.RequestHeaders = auditHeaders(r.Header)
 	}
 	defer func() {
 		audit.LatencyMS = time.Since(started).Milliseconds()
@@ -117,12 +122,19 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		if audit.Status == 0 {
 			audit.Status = http.StatusInternalServerError
 		}
-		audit.ResponseBody = captured.body.String()
+		if captured.captureBody {
+			audit.ResponseBody = captured.body.String()
+		}
+		if debugEnabled && len(audit.ResponseHeaders) == 0 {
+			audit.ResponseHeaders = auditHeaders(captured.Header())
+		}
 		p.record(audit)
 	}()
 	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
 	body, err := io.ReadAll(r.Body)
-	audit.RequestBody = string(body)
+	if debugEnabled {
+		audit.RequestBody = string(body)
+	}
 	if err != nil {
 		audit.Error = "request body is too large or unreadable"
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "request body is too large or unreadable")
@@ -214,6 +226,9 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		writeOpenAIError(w, http.StatusBadGateway, "signing_error", audit.Error)
 		return
 	}
+	if debugEnabled {
+		audit.RequestHeaders = auditHeaders(request.Header)
+	}
 	response, err := p.client.Do(request)
 	if err != nil {
 		message := "upstream request failed: " + err.Error()
@@ -222,6 +237,10 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		return
 	}
 	defer response.Body.Close()
+	if debugEnabled || response.StatusCode != http.StatusOK {
+		captured.captureBody = true
+		audit.ResponseHeaders = auditHeaders(response.Header)
+	}
 	copyUpstreamHeaders(w.Header(), response.Header)
 	w.Header().Set("X-Atom2api-Account", route.Account.ID)
 	if streaming && response.StatusCode >= 200 && response.StatusCode < 300 {
@@ -554,6 +573,38 @@ func copyUpstreamHeaders(destination, source http.Header) {
 			destination.Add(name, value)
 		}
 	}
+}
+
+func auditHeaders(headers http.Header) map[string][]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	sanitized := make(map[string][]string, len(headers))
+	for name, values := range headers {
+		canonical := http.CanonicalHeaderKey(name)
+		if canonical == "" {
+			continue
+		}
+		if isSensitiveAuditHeader(canonical) {
+			sanitized[canonical] = []string{"[REDACTED]"}
+			continue
+		}
+		sanitized[canonical] = append([]string(nil), values...)
+	}
+	return sanitized
+}
+
+func isSensitiveAuditHeader(name string) bool {
+	lower := strings.ToLower(name)
+	if lower == "authorization" || lower == "proxy-authorization" || lower == "cookie" || lower == "set-cookie" {
+		return true
+	}
+	return strings.Contains(lower, "api-key") || strings.Contains(lower, "apikey") ||
+		strings.Contains(lower, "token") || strings.Contains(lower, "secret") ||
+		strings.Contains(lower, "credential") || strings.Contains(lower, "password") ||
+		strings.Contains(lower, "access-key") || strings.Contains(lower, "auth-key") ||
+		strings.Contains(lower, "private-key") || strings.Contains(lower, "signature") ||
+		strings.HasSuffix(lower, "-sig")
 }
 
 func isHopByHop(name string) bool {

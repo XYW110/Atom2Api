@@ -221,24 +221,26 @@ type ModelSetting struct {
 }
 
 type UsageRecord struct {
-	ID              string    `json:"id"`
-	Timestamp       time.Time `json:"timestamp"`
-	Method          string    `json:"method,omitempty"`
-	Path            string    `json:"path"`
-	Model           string    `json:"model"`
-	UpstreamModel   string    `json:"upstream_model"`
-	AccountID       string    `json:"account_id,omitempty"`
-	APIKeyID        string    `json:"api_key_id,omitempty"`
-	Status          int       `json:"status"`
-	LatencyMS       int64     `json:"latency_ms"`
-	InputTokens     int64     `json:"input_tokens"`
-	OutputTokens    int64     `json:"output_tokens"`
-	CachedTokens    int64     `json:"cached_tokens,omitempty"`
-	ReasoningTokens int64     `json:"reasoning_tokens,omitempty"`
-	Streaming       bool      `json:"streaming"`
-	Error           string    `json:"error,omitempty"`
-	RequestBody     string    `json:"request_body,omitempty"`
-	ResponseBody    string    `json:"response_body,omitempty"`
+	ID              string              `json:"id"`
+	Timestamp       time.Time           `json:"timestamp"`
+	Method          string              `json:"method,omitempty"`
+	Path            string              `json:"path"`
+	Model           string              `json:"model"`
+	UpstreamModel   string              `json:"upstream_model"`
+	AccountID       string              `json:"account_id,omitempty"`
+	APIKeyID        string              `json:"api_key_id,omitempty"`
+	Status          int                 `json:"status"`
+	LatencyMS       int64               `json:"latency_ms"`
+	InputTokens     int64               `json:"input_tokens"`
+	OutputTokens    int64               `json:"output_tokens"`
+	CachedTokens    int64               `json:"cached_tokens,omitempty"`
+	ReasoningTokens int64               `json:"reasoning_tokens,omitempty"`
+	Streaming       bool                `json:"streaming"`
+	Error           string              `json:"error,omitempty"`
+	RequestBody     string              `json:"request_body,omitempty"`
+	ResponseBody    string              `json:"response_body,omitempty"`
+	RequestHeaders  map[string][]string `json:"request_headers,omitempty"`
+	ResponseHeaders map[string][]string `json:"response_headers,omitempty"`
 }
 
 type persistedState struct {

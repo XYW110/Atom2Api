@@ -77,6 +77,11 @@ function readableBody(body?: string) {
   }
 }
 
+function serializedHeaders(headers?: Record<string, string[]>) {
+  if (!headers || Object.keys(headers).length === 0) return '';
+  return JSON.stringify(headers, null, 2);
+}
+
 function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: string; copyLabel: string }) {
   const [copied, setCopied] = useState(false);
   const formatted = useMemo(() => readableBody(body), [body]);
@@ -300,9 +305,11 @@ export default function AuditPage() {
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">请求时间</p><time className="mt-1 block whitespace-nowrap text-xs tabular-nums text-zinc-700" dateTime={detail.timestamp}>{formatRequestTime(detail.timestamp)}</time></div>
                 </div>
                 {detail.error ? <div className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-5 py-3 text-xs text-red-700"><AlertCircle className="mt-0.5 shrink-0" size={14} /><span className="break-all">{detail.error}</span></div> : null}
-                <Tabs aria-label="请求和响应正文" classNames={{ base: 'px-5 pt-3', panel: 'p-0 pt-3' }} color="primary" variant="underlined">
+                <Tabs aria-label="请求和响应详情" classNames={{ base: 'px-5 pt-3', panel: 'p-0 pt-3' }} color="primary" variant="underlined">
                   <Tab key="request" title="请求内容"><BodyViewer body={detail.request_body} copyLabel="复制请求内容" emptyText="此历史记录未保存请求正文" /></Tab>
+                  <Tab key="request-headers" title="请求 Header"><BodyViewer body={serializedHeaders(detail.request_headers)} copyLabel="复制请求 Header" emptyText="此历史记录未保存请求 Header" /></Tab>
                   <Tab key="response" title="响应内容"><BodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" /></Tab>
+                  <Tab key="response-headers" title="响应 Header"><BodyViewer body={serializedHeaders(detail.response_headers)} copyLabel="复制响应 Header" emptyText="此历史记录未保存响应 Header" /></Tab>
                 </Tabs>
               </>
             ) : null}
