@@ -19,6 +19,7 @@ type ModelView struct {
 	AccountCount  int      `json:"account_count"`
 	Accounts      []string `json:"accounts"`
 	Plans         []string `json:"plans"`
+	Manual        bool     `json:"manual"`
 }
 
 type ModelRoute struct {
@@ -47,7 +48,8 @@ func (r *ModelRouter) Catalog() []ModelView {
 		plans    map[string]struct{}
 	}
 	aggregates := map[string]*aggregate{}
-	for _, account := range r.store.Accounts() {
+	accounts := r.store.Accounts()
+	for _, account := range accounts {
 		for _, model := range account.Models {
 			if !model.PlanAvailable || model.DisplayModelName == "" {
 				continue
@@ -70,12 +72,37 @@ func (r *ModelRouter) Catalog() []ModelView {
 		}
 	}
 	settings := r.store.ModelSettings()
+	for upstream, setting := range settings {
+		if _, exists := aggregates[upstream]; exists || !setting.Manual {
+			continue
+		}
+		baseURL := defaultGatewayURL
+		if r.store.config != nil {
+			baseURL = r.store.config.Snapshot().GatewayURL
+		}
+		entry := &aggregate{
+			view: ModelView{
+				ID: upstream, Alias: upstream, Upstream: upstream, ProviderType: "openai",
+				BaseURL: baseURL, ContextWindow: 64000, Enabled: true, Manual: true,
+			},
+			accounts: map[string]struct{}{}, plans: map[string]struct{}{},
+		}
+		for _, account := range accounts {
+			entry.accounts[account.ID] = struct{}{}
+			if account.Plan.Plan != nil && account.Plan.Plan.PlanName != "" {
+				entry.plans[account.Plan.Plan.PlanName] = struct{}{}
+			}
+		}
+		aggregates[upstream] = entry
+	}
 	result := make([]ModelView, 0, len(aggregates))
 	for upstream, entry := range aggregates {
 		if setting, ok := settings[upstream]; ok {
 			entry.view.Alias = setting.Alias
 			entry.view.Enabled = setting.Enabled
 		}
+		entry.view.Accounts = []string{}
+		entry.view.Plans = []string{}
 		for id := range entry.accounts {
 			entry.view.Accounts = append(entry.view.Accounts, id)
 		}
@@ -122,6 +149,17 @@ func (r *ModelRouter) Resolve(requested string, key APIKey) (ModelRoute, error) 
 		}
 		account, token, _, err := r.store.Account(accountView.ID)
 		if err != nil {
+			continue
+		}
+		if selected.Manual {
+			candidates = append(candidates, candidate{
+				account: account,
+				model: CodingPlanModel{
+					DisplayModelName: selected.Upstream, BaseURL: selected.BaseURL,
+					ProviderType: selected.ProviderType, ContextWindow: selected.ContextWindow, PlanAvailable: true,
+				},
+				token: token,
+			})
 			continue
 		}
 		for _, model := range account.Models {

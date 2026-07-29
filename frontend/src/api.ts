@@ -112,6 +112,7 @@ export interface ModelRecord {
   account_count: number;
   accounts: string[];
   plans: string[];
+  manual: boolean;
 }
 
 export interface DashboardSummary {

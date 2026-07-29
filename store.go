@@ -217,6 +217,7 @@ type ModelSetting struct {
 	Upstream string `json:"upstream"`
 	Alias    string `json:"alias"`
 	Enabled  bool   `json:"enabled"`
+	Manual   bool   `json:"manual,omitempty"`
 }
 
 type UsageRecord struct {
@@ -708,6 +709,17 @@ func (s *Store) SetModelSetting(setting ModelSetting) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state.ModelSettings[setting.Upstream] = setting
+	return s.saveLocked()
+}
+
+func (s *Store) DeleteModelSetting(upstream string) error {
+	upstream = strings.TrimSpace(upstream)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.state.ModelSettings[upstream]; !exists {
+		return os.ErrNotExist
+	}
+	delete(s.state.ModelSettings, upstream)
 	return s.saveLocked()
 }
 

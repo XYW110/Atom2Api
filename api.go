@@ -169,18 +169,61 @@ func (a *API) HandleModels(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": a.models.Catalog()})
 }
 
+func (a *API) HandleCreateModel(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Upstream string `json:"upstream"`
+		Alias    string `json:"alias"`
+	}
+	if !decodeJSONBody(w, r, &request, 8<<10) {
+		return
+	}
+	request.Upstream = strings.TrimSpace(request.Upstream)
+	request.Alias = strings.TrimSpace(request.Alias)
+	if request.Upstream == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "upstream model is required"})
+		return
+	}
+	if request.Alias == "" {
+		request.Alias = request.Upstream
+	}
+	for _, model := range a.models.Catalog() {
+		if model.Upstream == request.Upstream || model.Alias == request.Upstream {
+			writeJSON(w, http.StatusConflict, errorResponse{Error: "upstream model is already in use"})
+			return
+		}
+		if model.Upstream == request.Alias || model.Alias == request.Alias {
+			writeJSON(w, http.StatusConflict, errorResponse{Error: "model alias is already in use"})
+			return
+		}
+	}
+	setting := ModelSetting{Upstream: request.Upstream, Alias: request.Alias, Enabled: true, Manual: true}
+	if err := a.store.SetModelSetting(setting); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	for _, model := range a.models.Catalog() {
+		if model.Upstream == setting.Upstream {
+			writeJSON(w, http.StatusCreated, model)
+			return
+		}
+	}
+	writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "model was saved but could not be loaded"})
+}
+
 func (a *API) HandleModelSetting(w http.ResponseWriter, r *http.Request) {
 	var setting ModelSetting
 	if !decodeJSONBody(w, r, &setting, 8<<10) {
 		return
 	}
+	setting.Upstream = strings.TrimSpace(setting.Upstream)
+	setting.Alias = strings.TrimSpace(setting.Alias)
 	found := false
 	for _, model := range a.models.Catalog() {
 		if model.Upstream == setting.Upstream {
 			found = true
 			continue
 		}
-		if strings.TrimSpace(setting.Alias) != "" && model.Alias == strings.TrimSpace(setting.Alias) {
+		if setting.Alias != "" && (model.Alias == setting.Alias || model.Upstream == setting.Alias) {
 			writeJSON(w, http.StatusConflict, errorResponse{Error: "model alias is already in use"})
 			return
 		}
@@ -189,11 +232,34 @@ func (a *API) HandleModelSetting(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "upstream model not found"})
 		return
 	}
+	if stored, exists := a.store.ModelSettings()[setting.Upstream]; exists {
+		setting.Manual = stored.Manual
+	}
 	if err := a.store.SetModelSetting(setting); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, setting)
+}
+
+func (a *API) HandleDeleteModel(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Upstream string `json:"upstream"`
+	}
+	if !decodeJSONBody(w, r, &request, 8<<10) {
+		return
+	}
+	request.Upstream = strings.TrimSpace(request.Upstream)
+	setting, exists := a.store.ModelSettings()[request.Upstream]
+	if !exists || !setting.Manual {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "manual model not found"})
+		return
+	}
+	if err := a.store.DeleteModelSetting(request.Upstream); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type dashboardResponse struct {

@@ -67,7 +67,9 @@ func main() {
 	adminMux.HandleFunc("PATCH /api/keys/{id}", api.HandleUpdateKey)
 	adminMux.HandleFunc("DELETE /api/keys/{id}", api.HandleDeleteKey)
 	adminMux.HandleFunc("GET /api/models", api.HandleModels)
+	adminMux.HandleFunc("POST /api/models", api.HandleCreateModel)
 	adminMux.HandleFunc("PUT /api/models/settings", api.HandleModelSetting)
+	adminMux.HandleFunc("DELETE /api/models/settings", api.HandleDeleteModel)
 	adminMux.HandleFunc("GET /api/settings", handleGetSettings(config))
 	adminMux.HandleFunc("PUT /api/settings", handleUpdateSettings(config))
 
