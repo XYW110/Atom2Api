@@ -1,0 +1,16 @@
+# Runtime state and local secrets
+config.json
+data/
+
+# Local builds and integration artifacts
+.tmp-integration/
+atom2api
+atom2api.exe
+
+# Frontend dependencies and editor files
+frontend/node_modules/
+.idea/
+.vscode/
+
+# Logs
+*.log

@@ -1,0 +1,177 @@
+package main
+
+import (
+	"errors"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+type ModelView struct {
+	ID            string   `json:"id"`
+	Alias         string   `json:"alias"`
+	Upstream      string   `json:"upstream"`
+	ProviderType  string   `json:"provider_type"`
+	BaseURL       string   `json:"base_url"`
+	ContextWindow int      `json:"context_window"`
+	Enabled       bool     `json:"enabled"`
+	AccountCount  int      `json:"account_count"`
+	Accounts      []string `json:"accounts"`
+	Plans         []string `json:"plans"`
+}
+
+type ModelRoute struct {
+	Requested string
+	Upstream  string
+	Alias     string
+	Model     CodingPlanModel
+	Account   Account
+	Token     string
+}
+
+type ModelRouter struct {
+	store *Store
+	mu    sync.Mutex
+	next  map[string]int
+}
+
+func NewModelRouter(store *Store) *ModelRouter {
+	return &ModelRouter{store: store, next: map[string]int{}}
+}
+
+func (r *ModelRouter) Catalog() []ModelView {
+	type aggregate struct {
+		view     ModelView
+		accounts map[string]struct{}
+		plans    map[string]struct{}
+	}
+	aggregates := map[string]*aggregate{}
+	for _, account := range r.store.Accounts() {
+		for _, model := range account.Models {
+			if !model.PlanAvailable || model.DisplayModelName == "" {
+				continue
+			}
+			entry := aggregates[model.DisplayModelName]
+			if entry == nil {
+				entry = &aggregate{
+					view: ModelView{
+						ID: model.DisplayModelName, Alias: model.DisplayModelName, Upstream: model.DisplayModelName,
+						ProviderType: model.ProviderType, BaseURL: model.BaseURL, ContextWindow: model.ContextWindow, Enabled: true,
+					},
+					accounts: map[string]struct{}{}, plans: map[string]struct{}{},
+				}
+				aggregates[model.DisplayModelName] = entry
+			}
+			entry.accounts[account.ID] = struct{}{}
+			if account.Plan.Plan != nil && account.Plan.Plan.PlanName != "" {
+				entry.plans[account.Plan.Plan.PlanName] = struct{}{}
+			}
+		}
+	}
+	settings := r.store.ModelSettings()
+	result := make([]ModelView, 0, len(aggregates))
+	for upstream, entry := range aggregates {
+		if setting, ok := settings[upstream]; ok {
+			entry.view.Alias = setting.Alias
+			entry.view.Enabled = setting.Enabled
+		}
+		for id := range entry.accounts {
+			entry.view.Accounts = append(entry.view.Accounts, id)
+		}
+		for plan := range entry.plans {
+			entry.view.Plans = append(entry.view.Plans, plan)
+		}
+		sort.Strings(entry.view.Accounts)
+		sort.Strings(entry.view.Plans)
+		entry.view.AccountCount = len(entry.view.Accounts)
+		result = append(result, entry.view)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Alias < result[j].Alias })
+	return result
+}
+
+func (r *ModelRouter) Resolve(requested string, key APIKey) (ModelRoute, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return ModelRoute{}, errors.New("model is required")
+	}
+	var selected *ModelView
+	for _, model := range r.Catalog() {
+		if model.Enabled && (model.Alias == requested || model.Upstream == requested) {
+			copy := model
+			selected = &copy
+			break
+		}
+	}
+	if selected == nil {
+		return ModelRoute{}, errors.New("model is not available")
+	}
+	if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, requested) && !containsString(key.AllowedModels, selected.Upstream) && !containsString(key.AllowedModels, selected.Alias) {
+		return ModelRoute{}, errors.New("API key is not allowed to use this model")
+	}
+	type candidate struct {
+		account Account
+		model   CodingPlanModel
+		token   string
+	}
+	var candidates []candidate
+	for _, accountView := range r.store.Accounts() {
+		if !accountView.Enabled || accountView.Status != "active" || quotaExhausted(accountView.Plan, accountView.LastSyncAt) {
+			continue
+		}
+		account, token, _, err := r.store.Account(accountView.ID)
+		if err != nil {
+			continue
+		}
+		for _, model := range account.Models {
+			if model.PlanAvailable && model.DisplayModelName == selected.Upstream {
+				candidates = append(candidates, candidate{account: account, model: model, token: token})
+				break
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return ModelRoute{}, errors.New("no active account has quota for this model")
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].account.ConsecutiveErr < candidates[j].account.ConsecutiveErr
+	})
+	r.mu.Lock()
+	index := r.next[selected.Upstream] % len(candidates)
+	r.next[selected.Upstream] = (r.next[selected.Upstream] + 1) % len(candidates)
+	r.mu.Unlock()
+	choice := candidates[index]
+	return ModelRoute{
+		Requested: requested, Upstream: selected.Upstream, Alias: selected.Alias,
+		Model: choice.model, Account: choice.account, Token: choice.token,
+	}, nil
+}
+
+func quotaExhausted(status CodingPlanStatus, syncedAt *time.Time) bool {
+	elapsed := int64(0)
+	if syncedAt != nil {
+		elapsed = int64(time.Since(*syncedAt).Seconds())
+		if elapsed < 0 {
+			elapsed = 0
+		}
+	}
+	for _, window := range status.RateLimitWindows {
+		if window.ShowEnable == 1 && window.QuotaExhausted && window.SecondsUntilReset > elapsed {
+			return true
+		}
+	}
+	if !status.WindowQuotaExhausted {
+		return false
+	}
+	return status.CurrentUsage == nil || status.CurrentUsage.SecondsUntilReset > elapsed
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}

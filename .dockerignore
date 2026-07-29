@@ -1,0 +1,9 @@
+.git
+.gitignore
+.idea
+.vscode
+.tmp-integration
+config.json
+data
+frontend/node_modules
+*.log

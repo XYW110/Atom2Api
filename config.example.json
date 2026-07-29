@@ -1,0 +1,10 @@
+{
+  "user_agent": "atomcode/5.0.2",
+  "listen_address": ":8080",
+  "data_path": "data/atom2api.json",
+  "admin_password": "change-this-password",
+  "platform_base_url": "https://acs.atomgit.com",
+  "codingplan_api_url": "https://api.gitcode.com/api/v5",
+  "gateway_url": "https://llm-api.atomgit.com/v1",
+  "request_timeout_seconds": 120
+}
