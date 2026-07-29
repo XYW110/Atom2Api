@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, CheckCircle2, Copy, ExternalLink, Pause, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
-import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
+import { AlertCircle, Check, CheckCircle2, Copy, ExternalLink, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
-import { apiFetch, type Account, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
+import { apiFetch, type Account, type PlanClaimLog, type PlanClaimResult, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
 
 const statusMeta = {
   active: { label: '运行中', color: 'success' as const },
@@ -71,12 +71,21 @@ export default function AccountsPage() {
   const [oauth, setOAuth] = useState<OAuthState | null>(null);
   const [oauthCopied, setOAuthCopied] = useState(false);
   const [deleting, setDeleting] = useState<Account | null>(null);
+  const [editing, setEditing] = useState<Account | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editScheduleEnabled, setEditScheduleEnabled] = useState(true);
+  const [editCron, setEditCron] = useState('0 10 * * *');
+  const [logAccount, setLogAccount] = useState<Account | null>(null);
+  const [claimLogs, setClaimLogs] = useState<PlanClaimLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
   const [snapshotAt, setSnapshotAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const oauthErrorNotified = useRef(false);
   const nextResetReloadAt = useRef(0);
   const oauthModal = useDisclosure();
   const deleteModal = useDisclosure();
+  const editModal = useDisclosure();
+  const logsModal = useDisclosure();
   const { showToast } = useToast();
 
   const load = useCallback(async () => {
@@ -194,6 +203,72 @@ export default function AccountsPage() {
     }
   };
 
+  const openEdit = (account: Account) => {
+    setEditing(account);
+    setEditName(account.name);
+    setEditScheduleEnabled(account.plan_claim_schedule.enabled);
+    setEditCron(account.plan_claim_schedule.cron || '0 10 * * *');
+    editModal.onOpen();
+  };
+
+  const saveAccount = async () => {
+    if (!editing) return;
+    const name = editName.trim();
+    const cron = editCron.trim();
+    if (!name) {
+      showToast('error', '无法保存账号', '账号名称不能为空');
+      return;
+    }
+    if (editScheduleEnabled && !cron) {
+      showToast('error', '无法保存领取计划', 'CRON 表达式不能为空');
+      return;
+    }
+    setBusy(`edit:${editing.id}`);
+    try {
+      await apiFetch(`/api/accounts/${editing.id}`, jsonRequest('PATCH', {
+        name,
+        plan_claim_schedule: { enabled: editScheduleEnabled, cron: cron || '0 10 * * *' },
+      }));
+      editModal.onClose();
+      setEditing(null);
+      await load();
+      showToast('success', '账号已更新', `“${name}”领取计划已保存`);
+    } catch (requestError) {
+      showToast('error', '保存账号失败', errorMessage(requestError, '请检查 CRON 表达式'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const claimAccount = async (account: Account) => {
+    setBusy(`claim:${account.id}`);
+    try {
+      const result = await apiFetch<PlanClaimResult>(`/api/accounts/${account.id}/claim`, jsonRequest('POST'));
+      await load();
+      showToast('success', 'Coding Plan 领取完成', result.log.plan_name || `“${account.name}”权益与模型已同步`);
+    } catch (requestError) {
+      await load();
+      showToast('error', 'Coding Plan 领取失败', `“${account.name}”：${errorMessage(requestError, '未知错误')}`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const openClaimLogs = async (account: Account) => {
+    setLogAccount(account);
+    setClaimLogs([]);
+    setLogsLoading(true);
+    logsModal.onOpen();
+    try {
+      const response = await apiFetch<{ data: PlanClaimLog[] }>(`/api/plan-claims?account_id=${encodeURIComponent(account.id)}&limit=100`);
+      setClaimLogs(response.data || []);
+    } catch (requestError) {
+      showToast('error', '无法加载领取记录', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
   const toggleAccount = async (account: Account) => {
     setBusy(`toggle:${account.id}`);
     try {
@@ -242,7 +317,7 @@ export default function AccountsPage() {
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto">
             <Table aria-label="AtomGit 账号列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
-              <TableHeader><TableColumn>账号</TableColumn><TableColumn>订阅</TableColumn><TableColumn>当前窗口</TableColumn><TableColumn>可用模型</TableColumn><TableColumn>代理用量</TableColumn><TableColumn>最近同步</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
+              <TableHeader><TableColumn>账号</TableColumn><TableColumn>订阅</TableColumn><TableColumn>当前窗口</TableColumn><TableColumn>可用模型</TableColumn><TableColumn>代理用量</TableColumn><TableColumn>最近同步</TableColumn><TableColumn>计划领取</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
               <TableBody items={filtered} emptyContent={<EmptyState icon={Users} title="尚未连接账号" description="连接 AtomGit 后将自动领取或同步 Coding Plan" />}>
                 {(account) => {
                   const usage = accountUsage(account);
@@ -255,8 +330,9 @@ export default function AccountsPage() {
                       <TableCell><span className="font-medium text-zinc-700">{account.models.length}</span></TableCell>
                       <TableCell><div><p className="font-medium text-zinc-800">{formatTokens(account.input_tokens + account.output_tokens)}</p><p className="mt-0.5 text-xs text-zinc-400">{account.request_count.toLocaleString()} 次请求</p></div></TableCell>
                       <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(account.last_sync_at)}</span></TableCell>
+                      <TableCell><div className="min-w-28"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${account.plan_claim_schedule.enabled ? 'bg-emerald-500' : 'bg-zinc-300'}`} /><span className="text-xs text-zinc-600">{account.plan_claim_schedule.enabled ? '已启用' : '已停用'}</span></div><code className="mt-1 block whitespace-nowrap font-mono text-[11px] text-zinc-400">{account.plan_claim_schedule.cron}</code></div></TableCell>
                       <TableCell><Tooltip content={account.last_error || status.label}><Chip color={status.color} radius="sm" size="sm" variant="flat">{status.label}</Chip></Tooltip></TableCell>
-                      <TableCell><div className="flex justify-end gap-1"><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
+                      <TableCell><div className="flex min-w-56 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
                     </TableRow>
                   );
                 }}
@@ -269,6 +345,14 @@ export default function AccountsPage() {
 
       <Modal isOpen={oauthModal.isOpen} radius="sm" onOpenChange={oauthModal.onOpenChange}>
         <ModalContent>{(onClose) => <><ModalHeader>连接 AtomGit</ModalHeader><ModalBody>{oauth?.status === 'complete' ? <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><CheckCircle2 className="shrink-0" size={19} /><span>授权完成，账号权益与模型已同步。</span></div> : oauth?.status === 'expired' ? <div className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700"><AlertCircle className="shrink-0" size={19} /><span>授权会话已过期，请重新发起连接。</span></div> : <div className="space-y-4"><div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800"><span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" /><span>授权链接已生成，请复制链接或前往 AtomGit 完成授权。</span></div><div className="flex items-center gap-2"><Input isReadOnly aria-label="AtomGit OAuth 链接" classNames={{ input: 'font-mono text-xs' }} radius="sm" value={oauth?.login_url || ''} /><Tooltip content={oauthCopied ? '已复制' : '复制 OAuth 链接'}><Button isIconOnly aria-label="复制 OAuth 链接" color={oauthCopied ? 'success' : 'primary'} radius="sm" variant="flat" onPress={() => void copyOAuthURL()}>{oauthCopied ? <Check size={17} /> : <Copy size={17} />}</Button></Tooltip></div><Button as="a" color="primary" endContent={<ExternalLink size={16} />} href={oauth?.login_url} radius="sm" rel="noreferrer" target="_blank">前往 AtomGit 授权</Button></div>}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>{oauth?.status === 'complete' ? '完成' : '关闭'}</Button></ModalFooter></>}</ModalContent>
+      </Modal>
+
+      <Modal isOpen={editModal.isOpen} radius="sm" size="lg" onOpenChange={editModal.onOpenChange}>
+        <ModalContent>{(onClose) => <><ModalHeader>编辑账号</ModalHeader><ModalBody><div className="space-y-5"><Input isRequired label="账号名称" labelPlacement="outside" radius="sm" value={editName} onValueChange={setEditName} /><div className="flex items-center justify-between gap-4 rounded-md border border-zinc-200 px-4 py-3"><div><p className="text-sm font-medium text-zinc-800">定时领取 Coding Plan</p><code className="mt-1 block font-mono text-xs text-zinc-400">{editCron || '0 10 * * *'}</code></div><Switch aria-label="定时领取 Coding Plan" isSelected={editScheduleEnabled} size="sm" onValueChange={setEditScheduleEnabled} /></div><Input isRequired={editScheduleEnabled} isDisabled={!editScheduleEnabled} label="CRON 表达式" labelPlacement="outside" placeholder="0 10 * * *" radius="sm" value={editCron} onValueChange={setEditCron} /></div></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="primary" isLoading={busy === `edit:${editing?.id}`} radius="sm" onPress={() => void saveAccount()}>保存</Button></ModalFooter></>}</ModalContent>
+      </Modal>
+
+      <Modal isOpen={logsModal.isOpen} radius="sm" scrollBehavior="inside" size="4xl" onOpenChange={logsModal.onOpenChange}>
+        <ModalContent>{(onClose) => <><ModalHeader>{logAccount ? `“${logAccount.name}”领取记录` : '领取记录'}</ModalHeader><ModalBody className="px-0">{logsLoading ? <div className="space-y-3 px-6 py-2">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}</div> : <Table aria-label="Coding Plan 领取记录" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3 text-sm' }}><TableHeader><TableColumn>触发方式</TableColumn><TableColumn>结果</TableColumn><TableColumn>套餐</TableColumn><TableColumn>开始时间</TableColumn><TableColumn>详情</TableColumn></TableHeader><TableBody items={claimLogs} emptyContent="暂无领取记录">{(claimLog) => <TableRow key={claimLog.id}><TableCell><Chip color={claimLog.trigger === 'scheduled' ? 'primary' : 'default'} radius="sm" size="sm" variant="flat">{claimLog.trigger === 'scheduled' ? '定时' : '手动'}</Chip></TableCell><TableCell><Chip color={claimLog.status === 'success' ? 'success' : claimLog.status === 'failed' ? 'danger' : 'warning'} radius="sm" size="sm" variant="flat">{claimLog.status === 'success' ? '成功' : claimLog.status === 'failed' ? '失败' : '进行中'}</Chip></TableCell><TableCell><span className="whitespace-nowrap text-zinc-700">{claimLog.plan_name || '—'}</span></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(claimLog.started_at)}</span></TableCell><TableCell><p className="max-w-96 truncate text-xs text-zinc-500" title={claimLog.message}>{claimLog.message || '—'}</p></TableCell></TableRow>}</TableBody></Table>}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>关闭</Button></ModalFooter></>}</ModalContent>
       </Modal>
 
       <Modal isOpen={deleteModal.isOpen} radius="sm" size="sm" onOpenChange={deleteModal.onOpenChange}>

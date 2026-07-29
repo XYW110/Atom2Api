@@ -15,13 +15,21 @@ type API struct {
 	store      *Store
 	oauth      *OAuthManager
 	codingPlan *CodingPlanClient
+	planClaims *PlanClaimService
 	models     *ModelRouter
 	proxy      *Proxy
 	keyLimiter *apiKeyLimiter
 }
 
 func NewAPI(store *Store, oauth *OAuthManager, codingPlan *CodingPlanClient, models *ModelRouter, proxy *Proxy) *API {
-	return &API{store: store, oauth: oauth, codingPlan: codingPlan, models: models, proxy: proxy, keyLimiter: newAPIKeyLimiter()}
+	api := &API{
+		store: store, oauth: oauth, codingPlan: codingPlan, models: models, proxy: proxy,
+		keyLimiter: newAPIKeyLimiter(),
+	}
+	if codingPlan != nil {
+		api.planClaims = NewPlanClaimService(store, codingPlan)
+	}
+	return api
 }
 
 func (a *API) HandleAccounts(w http.ResponseWriter, _ *http.Request) {
@@ -30,13 +38,27 @@ func (a *API) HandleAccounts(w http.ResponseWriter, _ *http.Request) {
 
 func (a *API) HandleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Name    *string `json:"name"`
-		Enabled *bool   `json:"enabled"`
+		Name          *string            `json:"name"`
+		Enabled       *bool              `json:"enabled"`
+		ClaimSchedule *PlanClaimSchedule `json:"plan_claim_schedule"`
 	}
 	if !decodeJSONBody(w, r, &request, 8<<10) {
 		return
 	}
-	view, err := a.store.UpdateAccount(r.PathValue("id"), func(account *Account) error {
+	if request.ClaimSchedule != nil {
+		request.ClaimSchedule.Cron = strings.TrimSpace(request.ClaimSchedule.Cron)
+		if request.ClaimSchedule.Cron == "" {
+			request.ClaimSchedule.Cron = defaultPlanClaimCron
+		}
+		if request.ClaimSchedule.Enabled && a.planClaims != nil {
+			if err := a.planClaims.ValidateCron(request.ClaimSchedule.Cron); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+				return
+			}
+		}
+	}
+	accountID := r.PathValue("id")
+	view, err := a.store.UpdateAccount(accountID, func(account *Account) error {
 		if request.Name != nil && strings.TrimSpace(*request.Name) != "" {
 			account.Name = strings.TrimSpace(*request.Name)
 		}
@@ -49,19 +71,33 @@ func (a *API) HandleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 				account.Status = "paused"
 			}
 		}
+		if request.ClaimSchedule != nil {
+			schedule := *request.ClaimSchedule
+			account.ClaimSchedule = &schedule
+		}
 		return nil
 	})
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	if request.ClaimSchedule != nil && a.planClaims != nil {
+		if err := a.planClaims.Reschedule(accountID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, view)
 }
 
 func (a *API) HandleAccountDelete(w http.ResponseWriter, r *http.Request) {
-	if err := a.store.DeleteAccount(r.PathValue("id")); err != nil {
+	accountID := r.PathValue("id")
+	if err := a.store.DeleteAccount(accountID); err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	if a.planClaims != nil {
+		a.planClaims.Unschedule(accountID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -81,12 +117,38 @@ func (a *API) HandleAccountSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) HandleAccountClaim(w http.ResponseWriter, r *http.Request) {
-	view, err := a.codingPlan.ClaimAndSync(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, errorResponse{Error: err.Error()})
+	if a.planClaims == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Coding Plan claim service is unavailable"})
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	result, err := a.planClaims.Claim(r.Context(), r.PathValue("id"), planClaimTriggerManual)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeStoreError(w, err)
+			return
+		}
+		status := http.StatusBadGateway
+		if errors.Is(err, errPlanClaimInProgress) {
+			status = http.StatusConflict
+		}
+		writeJSON(w, status, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) HandlePlanClaimLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "limit must be between 1 and 200"})
+			return
+		}
+		limit = parsed
+	}
+	logs := a.store.PlanClaimLogs(strings.TrimSpace(r.URL.Query().Get("account_id")), limit)
+	writeJSON(w, http.StatusOK, map[string]any{"data": logs})
 }
 
 func (a *API) HandleOAuthStart(w http.ResponseWriter, r *http.Request) {

@@ -42,21 +42,18 @@ func (c *CodingPlanClient) ClaimAndSync(ctx context.Context, accountID string) (
 		return AccountView{}, err
 	}
 	if c.oauth != nil {
-		if refreshed, refreshErr := c.oauth.Refresh(ctx, accountID); refreshErr == nil {
-			token = refreshed
-		}
-	}
-
-	status, statusErr := c.fetchStatus(ctx, token)
-	if statusErr == nil && status.Plan == nil {
-		_, err = c.claim(ctx, token)
+		token, err = c.oauth.Refresh(ctx, accountID)
 		if err != nil {
 			return AccountView{}, err
 		}
-		status, statusErr = c.fetchStatus(ctx, token)
 	}
-	if statusErr != nil {
-		return AccountView{}, statusErr
+
+	if _, err = c.claim(ctx, token); err != nil {
+		return AccountView{}, err
+	}
+	status, err := c.fetchStatus(ctx, token)
+	if err != nil {
+		return AccountView{}, err
 	}
 	tier := planTier(status.Plan)
 	models, err := c.fetchModels(ctx, token, tier)

@@ -20,7 +20,11 @@ import (
 	"time"
 )
 
-const stateVersion = 1
+const (
+	stateVersion         = 1
+	defaultPlanClaimCron = "0 10 * * *"
+	maxPlanClaimLogs     = 1000
+)
 
 type UserInfo struct {
 	ID        string `json:"id"`
@@ -119,25 +123,48 @@ type ProviderUsage struct {
 	TotalCounts int64              `json:"total_counts"`
 }
 
+type PlanClaimSchedule struct {
+	Enabled bool   `json:"enabled"`
+	Cron    string `json:"cron"`
+}
+
+func defaultPlanClaimSchedule() PlanClaimSchedule {
+	return PlanClaimSchedule{Enabled: true, Cron: defaultPlanClaimCron}
+}
+
+type PlanClaimLog struct {
+	ID          string     `json:"id"`
+	AccountID   string     `json:"account_id"`
+	AccountName string     `json:"account_name"`
+	Trigger     string     `json:"trigger"`
+	Cron        string     `json:"cron,omitempty"`
+	Status      string     `json:"status"`
+	PlanName    string     `json:"plan_name,omitempty"`
+	Message     string     `json:"message,omitempty"`
+	StartedAt   time.Time  `json:"started_at"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+}
+
 type Account struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	Status         string            `json:"status"`
-	Enabled        bool              `json:"enabled"`
-	Credentials    OAuthCredentials  `json:"credentials"`
-	User           UserInfo          `json:"user"`
-	Plan           CodingPlanStatus  `json:"plan"`
-	Models         []CodingPlanModel `json:"models"`
-	ProviderUsage  *ProviderUsage    `json:"provider_usage,omitempty"`
-	RequestCount   int64             `json:"request_count"`
-	InputTokens    int64             `json:"input_tokens"`
-	OutputTokens   int64             `json:"output_tokens"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
-	LastSyncAt     *time.Time        `json:"last_sync_at,omitempty"`
-	LastUsedAt     *time.Time        `json:"last_used_at,omitempty"`
-	LastError      string            `json:"last_error,omitempty"`
-	ConsecutiveErr int               `json:"consecutive_errors,omitempty"`
+	ID             string             `json:"id"`
+	Name           string             `json:"name"`
+	Status         string             `json:"status"`
+	Enabled        bool               `json:"enabled"`
+	Credentials    OAuthCredentials   `json:"credentials"`
+	User           UserInfo           `json:"user"`
+	Plan           CodingPlanStatus   `json:"plan"`
+	Models         []CodingPlanModel  `json:"models"`
+	ProviderUsage  *ProviderUsage     `json:"provider_usage,omitempty"`
+	ClaimSchedule  *PlanClaimSchedule `json:"plan_claim_schedule,omitempty"`
+	RequestCount   int64              `json:"request_count"`
+	InputTokens    int64              `json:"input_tokens"`
+	OutputTokens   int64              `json:"output_tokens"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+	LastSyncAt     *time.Time         `json:"last_sync_at,omitempty"`
+	LastUsedAt     *time.Time         `json:"last_used_at,omitempty"`
+	LastError      string             `json:"last_error,omitempty"`
+	ConsecutiveErr int                `json:"consecutive_errors,omitempty"`
 }
 
 type AccountView struct {
@@ -149,6 +176,7 @@ type AccountView struct {
 	Plan           CodingPlanStatus  `json:"plan"`
 	Models         []CodingPlanModel `json:"models"`
 	ProviderUsage  *ProviderUsage    `json:"provider_usage,omitempty"`
+	ClaimSchedule  PlanClaimSchedule `json:"plan_claim_schedule"`
 	RequestCount   int64             `json:"request_count"`
 	InputTokens    int64             `json:"input_tokens"`
 	OutputTokens   int64             `json:"output_tokens"`
@@ -161,10 +189,15 @@ type AccountView struct {
 }
 
 func (a Account) View() AccountView {
+	claimSchedule := defaultPlanClaimSchedule()
+	if a.ClaimSchedule != nil {
+		claimSchedule = *a.ClaimSchedule
+	}
 	view := AccountView{
 		ID: a.ID, Name: a.Name, Status: a.Status, Enabled: a.Enabled, User: a.User,
 		Plan: a.Plan, Models: append([]CodingPlanModel(nil), a.Models...), ProviderUsage: a.ProviderUsage,
-		RequestCount: a.RequestCount, InputTokens: a.InputTokens, OutputTokens: a.OutputTokens,
+		ClaimSchedule: claimSchedule,
+		RequestCount:  a.RequestCount, InputTokens: a.InputTokens, OutputTokens: a.OutputTokens,
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastSyncAt: a.LastSyncAt,
 		LastUsedAt: a.LastUsedAt, LastError: a.LastError,
 	}
@@ -253,6 +286,7 @@ type persistedState struct {
 	Accounts      []Account               `json:"accounts"`
 	APIKeys       []APIKey                `json:"api_keys"`
 	ModelSettings map[string]ModelSetting `json:"model_settings"`
+	PlanClaimLogs []PlanClaimLog          `json:"plan_claim_logs,omitempty"`
 	Usage         []UsageRecord           `json:"-"`
 }
 
@@ -493,6 +527,7 @@ func (s *Store) UpsertAccount(account Account, accessToken, refreshToken string)
 		account.InputTokens = existing.InputTokens
 		account.OutputTokens = existing.OutputTokens
 		account.LastUsedAt = existing.LastUsedAt
+		account.ClaimSchedule = existing.ClaimSchedule
 		if strings.TrimSpace(account.Name) == "" {
 			account.Name = existing.Name
 		}
@@ -508,6 +543,10 @@ func (s *Store) UpsertAccount(account Account, accessToken, refreshToken string)
 			}
 		}
 		account.CreatedAt = now
+		if account.ClaimSchedule == nil {
+			claimSchedule := defaultPlanClaimSchedule()
+			account.ClaimSchedule = &claimSchedule
+		}
 		s.state.Accounts = append(s.state.Accounts, account)
 		index = len(s.state.Accounts) - 1
 	}

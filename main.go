@@ -52,6 +52,10 @@ func main() {
 	models := NewModelRouter(store)
 	proxy := NewProxy(config, store, models, oauth)
 	api := NewAPI(store, oauth, codingPlan, models, proxy)
+	if err := api.planClaims.Start(); err != nil {
+		log.Fatal(err)
+	}
+	defer api.planClaims.Close()
 	adminAuth := NewAdminAuth(config)
 
 	adminMux := http.NewServeMux()
@@ -63,6 +67,7 @@ func main() {
 	adminMux.HandleFunc("DELETE /api/accounts/{id}", api.HandleAccountDelete)
 	adminMux.HandleFunc("POST /api/accounts/{id}/sync", api.HandleAccountSync)
 	adminMux.HandleFunc("POST /api/accounts/{id}/claim", api.HandleAccountClaim)
+	adminMux.HandleFunc("GET /api/plan-claims", api.HandlePlanClaimLogs)
 	adminMux.HandleFunc("POST /api/oauth/start", api.HandleOAuthStart)
 	adminMux.HandleFunc("GET /api/oauth/{id}", api.HandleOAuthPoll)
 	adminMux.HandleFunc("GET /api/keys", api.HandleKeys)

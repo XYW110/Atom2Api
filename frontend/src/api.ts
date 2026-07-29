@@ -67,6 +67,29 @@ export interface ProviderUsage {
   total_tokens: number;
 }
 
+export interface PlanClaimSchedule {
+  enabled: boolean;
+  cron: string;
+}
+
+export interface PlanClaimLog {
+  id: string;
+  account_id: string;
+  account_name: string;
+  trigger: 'manual' | 'scheduled';
+  cron?: string;
+  status: 'running' | 'success' | 'failed';
+  plan_name?: string;
+  message?: string;
+  started_at: string;
+  finished_at?: string;
+}
+
+export interface PlanClaimResult {
+  account: Account;
+  log: PlanClaimLog;
+}
+
 export interface Account {
   id: string;
   name: string;
@@ -76,6 +99,7 @@ export interface Account {
   plan: CodingPlanStatus;
   models: Array<{ display_model_name: string; plan_available: boolean }>;
   provider_usage?: ProviderUsage;
+  plan_claim_schedule: PlanClaimSchedule;
   request_count: number;
   input_tokens: number;
   output_tokens: number;
