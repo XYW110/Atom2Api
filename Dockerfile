@@ -13,7 +13,11 @@ COPY --from=frontend /src/frontend/dist ./frontend/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/atom2api .
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates && addgroup -S atom2api && adduser -S -G atom2api atom2api
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S atom2api \
+    && adduser -S -G atom2api atom2api \
+    && mkdir -p /data \
+    && chown atom2api:atom2api /data
 COPY --from=backend /out/atom2api /usr/local/bin/atom2api
 WORKDIR /data
 USER atom2api
