@@ -204,6 +204,9 @@ func TestProxyNonStreamingRewritesModelAndRecordsUsage(t *testing.T) {
 	if len(records) != 1 || records[0].InputTokens != 11 || records[0].OutputTokens != 7 || records[0].CachedTokens != 3 || records[0].AccountID != account.ID {
 		t.Fatalf("usage records = %#v", records)
 	}
+	if records[0].Method != http.MethodPost || records[0].RequestBody != `{"model":"gpt-test","messages":[{"role":"user","content":"hello"}]}` || records[0].ResponseBody != response.Body.String() {
+		t.Fatalf("audit content = %#v", records[0])
+	}
 	data, err := os.ReadFile(store.usagePath)
 	if err != nil || !bytes.Contains(data, []byte(`"input_tokens":11`)) {
 		t.Fatalf("usage log = %s, %v", data, err)
@@ -249,6 +252,9 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 	if len(records) != 1 || !records[0].Streaming || records[0].InputTokens != 20 || records[0].OutputTokens != 4 {
 		t.Fatalf("stream usage = %#v", records)
 	}
+	if records[0].Method != http.MethodPost || records[0].RequestBody == "" || records[0].ResponseBody != response.Body.String() {
+		t.Fatalf("stream audit content = %#v", records[0])
+	}
 	file, err := os.Open(store.usagePath)
 	if err != nil {
 		t.Fatal(err)
@@ -256,6 +262,60 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 	defer file.Close()
 	if !bufio.NewScanner(file).Scan() {
 		t.Fatal("usage log is empty")
+	}
+}
+
+func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
+	_, store := newTestStore(t)
+	now := time.Now().UTC()
+	record := UsageRecord{
+		ID: "req_audit_detail", Timestamp: now, Path: "/v1/chat/completions", Model: "gpt-audit",
+		Status: http.StatusOK, LatencyMS: 42, InputTokens: 5, OutputTokens: 7,
+		RequestBody:  `{"model":"gpt-audit","messages":[]}`,
+		ResponseBody: `{"id":"chatcmpl-audit","choices":[]}`,
+	}
+	if err := store.RecordUsage(record); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	if err := store.RecordUsage(UsageRecord{
+		ID: "req_audit_error", Timestamp: now.Add(time.Second), Method: http.MethodPost,
+		Path: "/v1/responses", Model: "gpt-error", Status: http.StatusBadGateway,
+		RequestBody: `{"model":"gpt-error"}`, ResponseBody: `{"error":"upstream failed"}`,
+	}); err != nil {
+		t.Fatalf("RecordUsage error entry: %v", err)
+	}
+
+	api := &API{store: store}
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/audit?status=success&page=1&page_size=20", nil)
+	listResponse := httptest.NewRecorder()
+	api.HandleAudits(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", listResponse.Code, listResponse.Body.String())
+	}
+	if strings.Contains(listResponse.Body.String(), `"request_body":`) || strings.Contains(listResponse.Body.String(), `"response_body":`) || strings.Contains(listResponse.Body.String(), "chatcmpl-audit") {
+		t.Fatalf("audit list contains full body: %s", listResponse.Body.String())
+	}
+	var list auditListResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if list.Total != 1 || len(list.Items) != 1 || list.Items[0].ID != record.ID || list.Items[0].Method != http.MethodPost || !list.Items[0].HasRequestBody || !list.Items[0].HasResponseBody {
+		t.Fatalf("audit list = %#v", list)
+	}
+
+	detailRequest := httptest.NewRequest(http.MethodGet, "/api/audit/"+record.ID, nil)
+	detailRequest.SetPathValue("id", record.ID)
+	detailResponse := httptest.NewRecorder()
+	api.HandleAuditDetail(detailResponse, detailRequest)
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body = %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	var detail auditDetailResponse
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail.Method != http.MethodPost || detail.RequestBody != record.RequestBody || detail.ResponseBody != record.ResponseBody {
+		t.Fatalf("audit detail = %#v", detail)
 	}
 }
 

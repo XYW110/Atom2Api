@@ -172,13 +172,13 @@ export interface AuditRecordSummary {
   has_response_body: boolean;
 }
 
-export interface AuditRecordDetail extends AuditRecordSummary {
+export type AuditRecordDetail = Omit<AuditRecordSummary, 'has_request_body' | 'has_response_body'> & {
   account_id?: string;
   api_key_id?: string;
   error?: string;
   request_body?: string;
   response_body?: string;
-}
+};
 
 export interface AuditListResponse {
   items: AuditRecordSummary[];

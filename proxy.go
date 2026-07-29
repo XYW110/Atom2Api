@@ -43,9 +43,10 @@ type auditResponseWriter struct {
 }
 
 func (w *auditResponseWriter) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
+	if w.status != 0 {
+		return
 	}
+	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
