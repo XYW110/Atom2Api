@@ -40,6 +40,7 @@ type Config struct {
 	GatewayURL         string `json:"gateway_url"`
 	SignerURL          string `json:"signer_url,omitempty"`
 	SignerToken        string `json:"signer_token,omitempty"`
+	AuditDebugEnabled  bool   `json:"audit_debug_enabled"`
 	RequestTimeoutSecs int    `json:"request_timeout_seconds"`
 }
 

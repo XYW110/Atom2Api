@@ -18,6 +18,7 @@ type settingsResponse struct {
 	GatewayURL         string    `json:"gateway_url"`
 	SignerURL          string    `json:"signer_url"`
 	SignerConfigured   bool      `json:"signer_configured"`
+	AuditDebugEnabled  bool      `json:"audit_debug_enabled"`
 	RequestTimeoutSecs int       `json:"request_timeout_seconds"`
 	DefaultPassword    bool      `json:"default_password"`
 	LoadedAt           time.Time `json:"loaded_at"`
@@ -31,6 +32,7 @@ type updateSettingsRequest struct {
 	SignerURL          *string `json:"signer_url"`
 	SignerToken        *string `json:"signer_token"`
 	AdminPassword      *string `json:"admin_password"`
+	AuditDebugEnabled  *bool   `json:"audit_debug_enabled"`
 	RequestTimeoutSecs *int    `json:"request_timeout_seconds"`
 }
 
@@ -82,6 +84,9 @@ func handleUpdateSettings(config *ConfigManager) http.HandlerFunc {
 		if request.AdminPassword != nil {
 			updated.AdminPassword = *request.AdminPassword
 		}
+		if request.AuditDebugEnabled != nil {
+			updated.AuditDebugEnabled = *request.AuditDebugEnabled
+		}
 		if request.RequestTimeoutSecs != nil {
 			updated.RequestTimeoutSecs = *request.RequestTimeoutSecs
 		}
@@ -111,8 +116,9 @@ func writeSettingsResponse(w http.ResponseWriter, status int, snapshot ConfigSna
 		UserAgent: snapshot.UserAgent, ListenAddress: snapshot.ListenAddress, DataPath: snapshot.DataPath,
 		PlatformBaseURL: snapshot.PlatformBaseURL, CodingPlanAPIURL: snapshot.CodingPlanAPIURL,
 		GatewayURL: snapshot.GatewayURL, SignerURL: snapshot.SignerURL,
-		SignerConfigured: true, RequestTimeoutSecs: snapshot.RequestTimeoutSecs,
-		DefaultPassword: snapshot.AdminPassword == defaultAdminPassword, LoadedAt: snapshot.LoadedAt,
+		SignerConfigured: true, AuditDebugEnabled: snapshot.AuditDebugEnabled,
+		RequestTimeoutSecs: snapshot.RequestTimeoutSecs,
+		DefaultPassword:    snapshot.AdminPassword == defaultAdminPassword, LoadedAt: snapshot.LoadedAt,
 	})
 }
 

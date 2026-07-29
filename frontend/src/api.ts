@@ -183,6 +183,8 @@ export type AuditRecordDetail = Omit<AuditRecordSummary, 'has_request_body' | 'h
   error?: string;
   request_body?: string;
   response_body?: string;
+  request_headers?: Record<string, string[]>;
+  response_headers?: Record<string, string[]>;
 };
 
 export interface AuditListResponse {
@@ -202,6 +204,7 @@ export interface SettingsResponse {
   gateway_url: string;
   signer_url: string;
   signer_configured: boolean;
+  audit_debug_enabled: boolean;
   request_timeout_seconds: number;
   default_password: boolean;
   loaded_at: string;
