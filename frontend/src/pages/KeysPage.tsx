@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { AlertCircle, Check, Copy, KeyRound, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, Copy, KeyRound, Pencil, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
 import { Button, Checkbox, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 import { apiFetch, type APIKeyRecord, type ModelRecord, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
+
+function parseLimit(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
 
 export default function KeysPage() {
   const [keys, setKeys] = useState<APIKeyRecord[]>([]);
@@ -14,10 +21,14 @@ export default function KeysPage() {
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [allowedModels, setAllowedModels] = useState<string[]>([]);
+  const [rpmLimit, setRPMLimit] = useState('0');
+  const [concurrencyLimit, setConcurrencyLimit] = useState('0');
+  const [editing, setEditing] = useState<APIKeyRecord | null>(null);
   const [secret, setSecret] = useState('');
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState<APIKeyRecord | null>(null);
   const creator = useDisclosure();
+  const editor = useDisclosure();
   const confirmation = useDisclosure();
   const { showToast } = useToast();
 
@@ -44,9 +55,29 @@ export default function KeysPage() {
     return keys.filter((key) => !normalized || key.name.toLowerCase().includes(normalized) || key.prefix.toLowerCase().includes(normalized));
   }, [keys, query]);
 
+  const resetForm = (key?: APIKeyRecord) => {
+    setName(key?.name || '');
+    setAllowedModels(key?.allowed_models || []);
+    setRPMLimit(String(key?.rpm_limit || 0));
+    setConcurrencyLimit(String(key?.concurrency_limit || 0));
+  };
+
+  const readForm = (action: string) => {
+    const rpm = parseLimit(rpmLimit);
+    const concurrency = parseLimit(concurrencyLimit);
+    if (!name.trim()) {
+      showToast('error', `${action}密钥失败`, '请输入密钥名称');
+      return null;
+    }
+    if (rpm === null || concurrency === null) {
+      showToast('error', `${action}密钥失败`, 'RPM 与并发上限必须是大于或等于 0 的整数');
+      return null;
+    }
+    return { name: name.trim(), allowed_models: allowedModels, rpm_limit: rpm, concurrency_limit: concurrency };
+  };
+
   const openCreate = () => {
-    setName('');
-    setAllowedModels([]);
+    resetForm();
     setSecret('');
     setCopied(false);
     creator.onOpen();
@@ -54,18 +85,41 @@ export default function KeysPage() {
 
   const createKey = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!name.trim()) {
-      showToast('error', '创建密钥失败', '请输入密钥名称');
-      return;
-    }
+    const values = readForm('创建');
+    if (!values) return;
     setBusy('create');
     try {
-      const response = await apiFetch<{ key: APIKeyRecord; secret: string }>('/api/keys', jsonRequest('POST', { name: name.trim(), allowed_models: allowedModels }));
+      const response = await apiFetch<{ key: APIKeyRecord; secret: string }>('/api/keys', jsonRequest('POST', values));
       setSecret(response.secret);
       await load();
       showToast('success', '密钥创建成功', `“${response.key.name}”已创建，请及时复制密钥`);
     } catch (requestError) {
       showToast('error', '创建密钥失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const openEdit = (key: APIKeyRecord) => {
+    setEditing(key);
+    resetForm(key);
+    editor.onOpen();
+  };
+
+  const updateKey = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editing) return;
+    const values = readForm('保存');
+    if (!values) return;
+    setBusy(`edit:${editing.id}`);
+    try {
+      const updated = await apiFetch<APIKeyRecord>(`/api/keys/${editing.id}`, jsonRequest('PATCH', values));
+      await load();
+      editor.onClose();
+      setEditing(null);
+      showToast('success', '密钥已更新', `“${updated.name}”的配置已生效`);
+    } catch (requestError) {
+      showToast('error', '保存密钥失败', errorMessage(requestError, '请稍后重试'));
     } finally {
       setBusy('');
     }
@@ -111,10 +165,30 @@ export default function KeysPage() {
     }
   };
 
+  const toggleModel = (alias: string, selected: boolean) => {
+    setAllowedModels((current) => selected ? [...current.filter((item) => item !== alias), alias] : current.filter((item) => item !== alias));
+  };
+
+  const formFields = () => <>
+    <Input autoFocus isRequired label="名称" labelPlacement="outside" placeholder="例如：生产服务" radius="sm" value={name} onValueChange={setName} />
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Input description="0 表示不限" label="RPM 上限" labelPlacement="outside" min={0} radius="sm" step={1} type="number" value={rpmLimit} onValueChange={setRPMLimit} />
+      <Input description="0 表示不限" label="并发上限" labelPlacement="outside" min={0} radius="sm" step={1} type="number" value={concurrencyLimit} onValueChange={setConcurrencyLimit} />
+    </div>
+    <div>
+      <p className="mb-3 text-sm font-medium text-zinc-700">可用模型</p>
+      <div className="max-h-52 space-y-2 overflow-y-auto rounded-md border border-zinc-200 p-3">
+        {models.map((model) => <Checkbox key={model.upstream} isSelected={allowedModels.includes(model.alias)} size="sm" onValueChange={(selected) => toggleModel(model.alias, selected)}><span className="font-mono text-xs">{model.alias}</span></Checkbox>)}
+        {!models.length ? <p className="py-3 text-center text-sm text-zinc-400">暂无已启用模型；留空代表允许全部未来模型</p> : null}
+      </div>
+      <p className="mt-2 text-xs text-zinc-400">未选择时允许访问全部已启用模型</p>
+    </div>
+  </>;
+
   const activeCount = keys.filter((key) => key.enabled && (!key.expires_at || new Date(key.expires_at) > new Date())).length;
 
   return (
-    <PageShell title="密钥管理" description="签发和撤销外部 OpenAI 兼容访问凭据" action={{ label: '创建密钥', icon: Plus, onPress: openCreate }}>
+    <PageShell title="密钥管理" description="签发、限制和撤销外部 OpenAI 兼容访问凭据" action={{ label: '创建密钥', icon: Plus, onPress: openCreate }}>
       {error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{error}</div> : null}
       <section className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-lg border border-zinc-200 bg-white px-5 py-4"><p className="text-xs text-zinc-500">密钥总数</p><p className="mt-1 text-xl font-semibold text-zinc-900">{keys.length}</p></div>
@@ -126,11 +200,25 @@ export default function KeysPage() {
         <div className="border-b border-zinc-100 p-4"><Input aria-label="搜索密钥" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称或前缀" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /></div>
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto"><Table aria-label="API 密钥列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
-            <TableHeader><TableColumn>名称</TableColumn><TableColumn>密钥前缀</TableColumn><TableColumn>模型权限</TableColumn><TableColumn>请求 / Tokens</TableColumn><TableColumn>创建时间</TableColumn><TableColumn>最近使用</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
+            <TableHeader><TableColumn>名称</TableColumn><TableColumn>密钥前缀</TableColumn><TableColumn>模型权限</TableColumn><TableColumn>请求限制</TableColumn><TableColumn>请求 / Tokens</TableColumn><TableColumn>创建时间</TableColumn><TableColumn>最近使用</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
             <TableBody items={filtered} emptyContent={<EmptyState icon={KeyRound} title="尚未创建密钥" description="创建后可用于 OpenAI SDK 的 Bearer 认证" />}>
               {(key) => {
                 const expired = Boolean(key.expires_at && new Date(key.expires_at) < new Date());
-                return <TableRow key={key.id}><TableCell><p className="font-medium text-zinc-900">{key.name}</p><p className="mt-0.5 text-xs text-zinc-400">{key.id}</p></TableCell><TableCell><code className="font-mono text-xs text-zinc-600">{key.prefix}</code></TableCell><TableCell><span className="text-zinc-600">{key.allowed_models?.length ? `${key.allowed_models.length} 个模型` : '全部模型'}</span></TableCell><TableCell><p className="font-medium text-zinc-800">{formatTokens(key.request_count)} 次</p><p className="mt-0.5 text-xs text-zinc-400">{formatTokens(key.input_tokens + key.output_tokens)} tokens</p></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(key.created_at)}</span></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(key.last_used_at)}</span></TableCell><TableCell><Chip color={expired ? 'danger' : key.enabled ? 'success' : 'default'} radius="sm" size="sm" variant="flat">{expired ? '已过期' : key.enabled ? '有效' : '已撤销'}</Chip></TableCell><TableCell><div className="flex justify-end gap-1"><Tooltip content={key.enabled ? '撤销密钥' : '恢复密钥'}><Button isIconOnly aria-label={key.enabled ? '撤销密钥' : '恢复密钥'} color={key.enabled ? 'warning' : 'success'} isLoading={busy === `toggle:${key.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleKey(key)}>{key.enabled ? <ShieldOff size={16} /> : <Check size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除密钥"><Button isIconOnly aria-label="删除密钥" color="danger" radius="sm" size="sm" variant="light" onPress={() => { setDeleting(key); confirmation.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell></TableRow>;
+                return <TableRow key={key.id}>
+                  <TableCell><p className="font-medium text-zinc-900">{key.name}</p><p className="mt-0.5 text-xs text-zinc-400">{key.id}</p></TableCell>
+                  <TableCell><code className="font-mono text-xs text-zinc-600">{key.prefix}</code></TableCell>
+                  <TableCell><span className="text-zinc-600">{key.allowed_models?.length ? `${key.allowed_models.length} 个模型` : '全部模型'}</span></TableCell>
+                  <TableCell>{key.rpm_limit || key.concurrency_limit ? <div className="space-y-0.5 whitespace-nowrap text-xs text-zinc-600"><p>RPM {key.rpm_limit || '不限'}</p><p>并发 {key.concurrency_limit || '不限'}</p></div> : <span className="text-zinc-400">不限</span>}</TableCell>
+                  <TableCell><p className="font-medium text-zinc-800">{formatTokens(key.request_count)} 次</p><p className="mt-0.5 text-xs text-zinc-400">{formatTokens(key.input_tokens + key.output_tokens)} tokens</p></TableCell>
+                  <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(key.created_at)}</span></TableCell>
+                  <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(key.last_used_at)}</span></TableCell>
+                  <TableCell><Chip color={expired ? 'danger' : key.enabled ? 'success' : 'default'} radius="sm" size="sm" variant="flat">{expired ? '已过期' : key.enabled ? '有效' : '已撤销'}</Chip></TableCell>
+                  <TableCell><div className="flex justify-end gap-1">
+                    <Tooltip content="编辑密钥"><Button isIconOnly aria-label="编辑密钥" radius="sm" size="sm" variant="light" onPress={() => openEdit(key)}><Pencil size={16} /></Button></Tooltip>
+                    <Tooltip content={key.enabled ? '撤销密钥' : '恢复密钥'}><Button isIconOnly aria-label={key.enabled ? '撤销密钥' : '恢复密钥'} color={key.enabled ? 'warning' : 'success'} isLoading={busy === `toggle:${key.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleKey(key)}>{key.enabled ? <ShieldOff size={16} /> : <Check size={16} />}</Button></Tooltip>
+                    <Tooltip color="danger" content="删除密钥"><Button isIconOnly aria-label="删除密钥" color="danger" radius="sm" size="sm" variant="light" onPress={() => { setDeleting(key); confirmation.onOpen(); }}><Trash2 size={16} /></Button></Tooltip>
+                  </div></TableCell>
+                </TableRow>;
               }}
             </TableBody>
           </Table></div>
@@ -138,8 +226,12 @@ export default function KeysPage() {
         <div className="border-t border-zinc-100 px-5 py-3 text-xs text-zinc-400">共 {filtered.length} 个密钥</div>
       </section>
 
-      <Modal isOpen={creator.isOpen} radius="sm" scrollBehavior="inside" onOpenChange={creator.onOpenChange}>
-        <ModalContent>{(onClose) => secret ? <><ModalHeader>密钥已创建</ModalHeader><ModalBody><div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">密钥仅在本次创建后显示。</div><div className="flex items-center gap-2"><Input isReadOnly aria-label="新 API 密钥" classNames={{ input: 'font-mono text-xs' }} radius="sm" value={secret} /><Button isIconOnly aria-label="复制密钥" color={copied ? 'success' : 'primary'} radius="sm" variant="flat" onPress={() => void copySecret()}>{copied ? <Check size={17} /> : <Copy size={17} />}</Button></div></ModalBody><ModalFooter><Button color="primary" radius="sm" onPress={onClose}>完成</Button></ModalFooter></> : <form onSubmit={createKey}><ModalHeader>创建 API 密钥</ModalHeader><ModalBody className="gap-5"><Input autoFocus isRequired label="名称" labelPlacement="outside" placeholder="例如：生产服务" radius="sm" value={name} onValueChange={setName} /><div><p className="mb-3 text-sm font-medium text-zinc-700">可用模型</p><div className="max-h-52 space-y-2 overflow-y-auto rounded-md border border-zinc-200 p-3">{models.map((model) => <Checkbox key={model.upstream} isSelected={allowedModels.includes(model.alias)} size="sm" onValueChange={(selected) => setAllowedModels((current) => selected ? [...current, model.alias] : current.filter((item) => item !== model.alias))}><span className="font-mono text-xs">{model.alias}</span></Checkbox>)}{!models.length ? <p className="py-3 text-center text-sm text-zinc-400">暂无已启用模型；留空代表允许全部未来模型</p> : null}</div><p className="mt-2 text-xs text-zinc-400">未选择时允许访问全部已启用模型</p></div></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="primary" isLoading={busy === 'create'} radius="sm" type="submit">创建</Button></ModalFooter></form>}</ModalContent>
+      <Modal isOpen={creator.isOpen} radius="sm" scrollBehavior="inside" size="lg" onOpenChange={creator.onOpenChange}>
+        <ModalContent>{(onClose) => secret ? <><ModalHeader>密钥已创建</ModalHeader><ModalBody><div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">密钥仅在本次创建后显示。</div><div className="flex items-center gap-2"><Input isReadOnly aria-label="新 API 密钥" classNames={{ input: 'font-mono text-xs' }} radius="sm" value={secret} /><Button isIconOnly aria-label="复制密钥" color={copied ? 'success' : 'primary'} radius="sm" variant="flat" onPress={() => void copySecret()}>{copied ? <Check size={17} /> : <Copy size={17} />}</Button></div></ModalBody><ModalFooter><Button color="primary" radius="sm" onPress={onClose}>完成</Button></ModalFooter></> : <form onSubmit={createKey}><ModalHeader>创建 API 密钥</ModalHeader><ModalBody className="gap-5">{formFields()}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="primary" isLoading={busy === 'create'} radius="sm" type="submit">创建</Button></ModalFooter></form>}</ModalContent>
+      </Modal>
+
+      <Modal isOpen={editor.isOpen} radius="sm" scrollBehavior="inside" size="lg" onOpenChange={editor.onOpenChange}>
+        <ModalContent>{(onClose) => <form onSubmit={updateKey}><ModalHeader>编辑 API 密钥</ModalHeader><ModalBody className="gap-5">{formFields()}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="primary" isLoading={busy === `edit:${editing?.id}`} radius="sm" type="submit">保存</Button></ModalFooter></form>}</ModalContent>
       </Modal>
 
       <Modal isOpen={confirmation.isOpen} radius="sm" size="sm" onOpenChange={confirmation.onOpenChange}>

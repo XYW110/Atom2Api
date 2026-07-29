@@ -93,6 +93,8 @@ export interface APIKeyRecord {
   prefix: string;
   enabled: boolean;
   allowed_models?: string[];
+  rpm_limit: number;
+  concurrency_limit: number;
   created_at: string;
   expires_at?: string;
   last_used_at?: string;

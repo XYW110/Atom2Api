@@ -17,10 +17,11 @@ type API struct {
 	codingPlan *CodingPlanClient
 	models     *ModelRouter
 	proxy      *Proxy
+	keyLimiter *apiKeyLimiter
 }
 
 func NewAPI(store *Store, oauth *OAuthManager, codingPlan *CodingPlanClient, models *ModelRouter, proxy *Proxy) *API {
-	return &API{store: store, oauth: oauth, codingPlan: codingPlan, models: models, proxy: proxy}
+	return &API{store: store, oauth: oauth, codingPlan: codingPlan, models: models, proxy: proxy, keyLimiter: newAPIKeyLimiter()}
 }
 
 func (a *API) HandleAccounts(w http.ResponseWriter, _ *http.Request) {
@@ -116,9 +117,11 @@ func (a *API) HandleKeys(w http.ResponseWriter, _ *http.Request) {
 
 func (a *API) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Name          string   `json:"name"`
-		AllowedModels []string `json:"allowed_models"`
-		ExpiresAt     string   `json:"expires_at"`
+		Name             string   `json:"name"`
+		AllowedModels    []string `json:"allowed_models"`
+		ExpiresAt        string   `json:"expires_at"`
+		RPMLimit         int      `json:"rpm_limit"`
+		ConcurrencyLimit int      `json:"concurrency_limit"`
 	}
 	if !decodeJSONBody(w, r, &request, 16<<10) {
 		return
@@ -132,7 +135,11 @@ func (a *API) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 		}
 		expires = &parsed
 	}
-	view, secret, err := a.store.CreateAPIKey(request.Name, request.AllowedModels, expires)
+	if request.RPMLimit < 0 || request.ConcurrencyLimit < 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "API key limits cannot be negative"})
+		return
+	}
+	view, secret, err := a.store.CreateAPIKeyWithLimits(request.Name, request.AllowedModels, expires, request.RPMLimit, request.ConcurrencyLimit)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
@@ -142,14 +149,24 @@ func (a *API) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) HandleUpdateKey(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Name          *string   `json:"name"`
-		Enabled       *bool     `json:"enabled"`
-		AllowedModels *[]string `json:"allowed_models"`
+		Name             *string   `json:"name"`
+		Enabled          *bool     `json:"enabled"`
+		AllowedModels    *[]string `json:"allowed_models"`
+		RPMLimit         *int      `json:"rpm_limit"`
+		ConcurrencyLimit *int      `json:"concurrency_limit"`
 	}
 	if !decodeJSONBody(w, r, &request, 16<<10) {
 		return
 	}
-	view, err := a.store.UpdateAPIKey(r.PathValue("id"), request.Name, request.Enabled, request.AllowedModels, nil)
+	if request.Name != nil && strings.TrimSpace(*request.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "API key name cannot be empty"})
+		return
+	}
+	if (request.RPMLimit != nil && *request.RPMLimit < 0) || (request.ConcurrencyLimit != nil && *request.ConcurrencyLimit < 0) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "API key limits cannot be negative"})
+		return
+	}
+	view, err := a.store.UpdateAPIKeyWithLimits(r.PathValue("id"), request.Name, request.Enabled, request.AllowedModels, nil, request.RPMLimit, request.ConcurrencyLimit)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -158,10 +175,12 @@ func (a *API) HandleUpdateKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) HandleDeleteKey(w http.ResponseWriter, r *http.Request) {
-	if err := a.store.DeleteAPIKey(r.PathValue("id")); err != nil {
+	keyID := r.PathValue("id")
+	if err := a.store.DeleteAPIKey(keyID); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	a.keyLimiter.forget(keyID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -551,6 +570,13 @@ func (a *API) RequireAPIKey(next func(http.ResponseWriter, *http.Request, APIKey
 			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "invalid or expired API key")
 			return
 		}
+		release, rejection, allowed := a.keyLimiter.acquire(key)
+		if !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(rejection.retryAfter))
+			writeOpenAIError(w, http.StatusTooManyRequests, "rate_limit_exceeded", rejection.message)
+			return
+		}
+		defer release()
 		next(w, r, key)
 	}
 }
