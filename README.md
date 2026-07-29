@@ -1,37 +1,39 @@
 # Atom2Api
 
-Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用的 OpenAI 兼容接口，并提供账号、额度、密钥、模型路由和 Token 用量仪表盘。
+English | [简体中文](./README.zh-CN.md)
 
-## ⚠️ 安全警告 / Security Warning
+Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API for external applications. It also provides dashboards for accounts, quotas, API keys, model routing, and token usage.
+
+## Security Warning
 
 > [!WARNING]
-> 本项目仅适合在可信网络环境中使用。部署或使用前，请充分评估以下安全风险：
+> This project is intended for use only in trusted network environments. Before deploying or using it, carefully assess the following security risks:
 
-- **默认使用明文 HTTP**：Atom2Api 本身不提供 TLS。客户端与服务之间的提示词、代码、响应和 API Key 均可能以明文传输；默认监听地址 `:8080` 还可能使服务暴露给同一网络中的其他设备。非纯本机使用时，必须配置 HTTPS 反向代理、防火墙和严格的访问范围。
-- **默认管理密码不安全**：首次启动的管理密码为 `atom2api`。OpenAI 兼容接口虽要求使用已创建的 API Key，但任何能访问服务且知道默认密码的人都可能进入管理控制台。首次登录后必须立即修改密码，并妥善保管已签发的 API Key。
-- **本地数据包含敏感信息**：OAuth token 使用 AES-256-GCM 加密保存，API Key 仅保存 SHA-256 摘要；但 `config.json` 仍以明文保存管理密码、`encryption_key` 及可选的 `signer_token`。同时取得 `config.json` 和 `data/` 的进程或用户可以解密 OAuth 凭据，请严格限制这些文件的读取权限并一同安全备份。
-- **审计日志会保存请求内容**：`<data_path>.usage.ndjson` 以明文记录请求与响应正文，其中可能包含提示词、源代码、个人信息或其它秘密。请限制日志访问、控制备份范围，并按数据保留要求及时清理。
-- **依赖非官方兼容实现**：本项目通过社区独立记录的签名兼容实现访问 AtomGit 上游，不属于 AtomGit/AtomCode 官方客户端或受支持集成。上游协议变更可能随时导致服务不可用，使用方式也可能带来账号限制或封禁风险。
+- **Plain HTTP by default**: Atom2Api does not provide TLS. Prompts, source code, responses, and API keys may be transmitted in plain text between clients and the service. The default listen address, `:8080`, may also expose the service to other devices on the same network. For anything beyond local-only use, you must configure an HTTPS reverse proxy, a firewall, and strict access controls.
+- **Insecure default administrator password**: The initial administrator password is `atom2api`. Although the OpenAI-compatible API requires a generated API key, anyone who can reach the service and knows the default password may access the management console. Change the password immediately after the first login and protect all issued API keys.
+- **Sensitive local data**: OAuth tokens are encrypted at rest with AES-256-GCM, and only SHA-256 digests of API keys are stored. However, `config.json` stores the administrator password, `encryption_key`, and optional `signer_token` in plain text. Any process or user with access to both `config.json` and `data/` can decrypt the OAuth credentials. Restrict access to these files and back them up together securely.
+- **Audit logs contain request content**: `<data_path>.usage.ndjson` records request and response bodies in plain text. These records may contain prompts, source code, personal data, or other secrets. Restrict log access, limit backup scope, and clean up records according to your data-retention requirements.
+- **Unofficial compatibility implementation**: This project accesses the AtomGit upstream through an independently documented, community-maintained signing implementation. It is not an official AtomGit/AtomCode client or supported integration. Upstream protocol changes may break the service at any time, and usage may result in account restrictions or bans.
 
-**免责声明 / Disclaimer**：本项目仅供学习和研究，不隶属于 AtomGit/AtomCode，也未获其官方认可。使用者需自行评估风险、遵守 AtomGit/AtomCode 的服务条款及适用法律，并对账号封禁、数据泄露、费用或其它损失承担全部责任。
+**Disclaimer**: This project is for learning and research only. It is not affiliated with or endorsed by AtomGit/AtomCode. You are responsible for evaluating the risks, complying with the AtomGit/AtomCode terms of service and applicable law, and accepting responsibility for account bans, data exposure, charges, or other losses.
 
-**AI 生成说明**：本项目代码 100% 由 AI（AtomCode / OpenCode）编写，人类仅负责提出需求和审核。
+**AI-generated code notice**: 100% of this project's code was written by AI (AtomCode / OpenCode). Humans only provided requirements and reviewed the result.
 
-## 已实现
+## Features
 
-- AtomGit broker OAuth：启动授权、轮询状态、交换 token、提前 5 分钟自动刷新
-- Coding Plan：按 `Max -> Pro -> Lite` 领取，读取订阅类型、滚动额度、到期时间、模型目录和 60 天用量
-- OpenAI 兼容端点：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/completions`、`/v1/embeddings`
-- 流式代理：SSE 即时转发，自动请求 `include_usage`，记录输入、输出、缓存和推理 tokens
-- 多账号路由：跳过停用或额度耗尽账号，在可用账号之间轮询
-- API Key：仅保存 SHA-256 摘要，支持模型白名单、撤销、恢复和过期时间
-- 管理安全：HttpOnly + SameSite 会话、登录限速、OAuth token AES-256-GCM 加密落盘
-- 仪表盘：请求趋势、请求数、输入/输出 tokens、成功率、延迟、模型分布和最近请求
-- 单二进制部署：React 控制台嵌入 Go 服务，另附 Docker/Compose
+- AtomGit broker OAuth: starts authorization, polls status, exchanges tokens, and automatically refreshes them five minutes before expiry
+- Coding Plan: claims plans in `Max -> Pro -> Lite` order and reads subscription type, rolling quota, expiry time, model catalog, and 60-day usage
+- OpenAI-compatible endpoints: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/completions`, and `/v1/embeddings`
+- Streaming proxy: forwards SSE in real time, automatically requests `include_usage`, and records input, output, cached, and reasoning tokens
+- Multi-account routing: skips disabled or quota-exhausted accounts and distributes requests across available accounts in round-robin order
+- API keys: stores SHA-256 digests only and supports model allowlists, revocation, restoration, and expiration
+- Management security: HttpOnly and SameSite sessions, login rate limiting, and AES-256-GCM encryption for stored OAuth tokens
+- Dashboard: request trends, request counts, input/output tokens, success rate, latency, model distribution, and recent requests
+- Single-binary deployment: embeds the React console in the Go service and also provides Docker and Compose configurations
 
-## 本地运行
+## Local Development
 
-要求 Go 1.22+、Node.js 20+。
+Requires Go 1.22+ and Node.js 20+.
 
 ```bash
 cd frontend
@@ -42,16 +44,16 @@ go test ./...
 go run .
 ```
 
-打开 `http://localhost:8080`。首次运行会生成 `config.json` 和随机 `encryption_key`。默认管理密码是 `atom2api`，登录后应立即在“系统设置”中修改。
+Open `http://localhost:8080`. On first launch, Atom2Api creates `config.json` with a random `encryption_key`. The default administrator password is `atom2api`; change it immediately under **System Settings** after logging in.
 
-也可以先使用示例配置：
+You can also start with the example configuration:
 
 ```bash
 cp config.example.json config.json
 go run .
 ```
 
-Windows PowerShell 对应命令：
+The equivalent Windows PowerShell commands are:
 
 ```powershell
 Copy-Item config.example.json config.json
@@ -64,17 +66,17 @@ go run .
 docker compose up -d --build
 ```
 
-数据保存在 `atom2api-data` volume。首次启动后访问控制台修改默认密码。
+Data is stored in the `atom2api-data` volume. After the first launch, open the console and change the default password.
 
-## 使用流程
+## Usage
 
-1. 登录控制台，进入“账号管理”。
-2. 点击“连接 AtomGit”，在新页面完成 OAuth 授权。
-3. Atom2Api 自动领取或同步 Coding Plan、额度和可用模型。
-4. 进入“密钥管理”创建外部 API Key；密钥明文只显示一次。
-5. 将客户端的 Base URL 设为 `http://localhost:8080/v1`，API Key 使用刚创建的 `sk-atom2-*`。
+1. Sign in to the console and open **Accounts**.
+2. Select **Connect AtomGit** and complete OAuth authorization on the page that opens.
+3. Atom2Api automatically claims or synchronizes the Coding Plan, quota, and available models.
+4. Open **API Keys** and create an API key for external clients. The plaintext key is displayed only once.
+5. Set the client's base URL to `http://localhost:8080/v1` and use the newly created `sk-atom2-*` API key.
 
-Python SDK 示例：
+Python SDK example:
 
 ```python
 from openai import OpenAI
@@ -91,7 +93,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-流式请求：
+Streaming request:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -100,27 +102,27 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## 配置
+## Configuration
 
-| 字段 | 默认值 | 说明 |
+| Field | Default | Description |
 |---|---|---|
-| `listen_address` | `:8080` | HTTP 监听地址；`PORT` 环境变量优先 |
-| `data_path` | `data/atom2api.json` | 账号、密钥摘要和计数状态 |
-| `admin_password` | `atom2api` | 控制台管理密码 |
-| `encryption_key` | 首次启动随机生成 | OAuth token 加密密钥，不应更换或泄露 |
+| `listen_address` | `:8080` | HTTP listen address; the `PORT` environment variable takes precedence |
+| `data_path` | `data/atom2api.json` | Account state, API key digests, and counters |
+| `admin_password` | `atom2api` | Management console password |
+| `encryption_key` | Randomly generated on first launch | OAuth token encryption key; do not change or disclose it |
 | `platform_base_url` | `https://acs.atomgit.com` | OAuth broker |
 | `codingplan_api_url` | `https://api.gitcode.com/api/v5` | Coding Plan REST API |
-| `gateway_url` | `https://llm-api.atomgit.com/v1` | 默认 LLM 网关 |
-| `signer_url` | 空 | 可选外部签名服务；为空时使用内置 signer |
-| `request_timeout_seconds` | `120` | 上游请求超时范围 5-600 秒 |
+| `gateway_url` | `https://llm-api.atomgit.com/v1` | Default LLM gateway |
+| `signer_url` | Empty | Optional external signing service; the built-in signer is used when empty |
+| `request_timeout_seconds` | `120` | Upstream request timeout, from 5 to 600 seconds |
 
-主状态写入 `data_path`，请求明细以 NDJSON 追加到 `<data_path>.usage.ndjson`，内存和日志最多保留最近 50,000 条请求用于仪表盘聚合。
+Primary state is written to `data_path`. Request records are appended to `<data_path>.usage.ndjson`, and both memory and the log retain at most the latest 50,000 requests for dashboard aggregation.
 
-## 签名兼容性
+## Signing Compatibility
 
-当前 AtomGit LLM 网关要求 `X-AtomCode-*` 请求签名。AtomCode 开源仓库只公开 signer 接口，官方构建中的实现不在仓库内。Atom2Api 内置了社区独立记录的 `atomcode-signing-v1` 实现，并用独立 fixture 验证 HKDF/HMAC 输出；来源见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+The AtomGit LLM gateway currently requires `X-AtomCode-*` request signatures. The open-source AtomCode repository exposes only the signer interface; the implementation included in official builds is not public. Atom2Api includes an independently documented, community-maintained implementation of `atomcode-signing-v1`, with separate fixtures that verify the HKDF/HMAC output. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for attribution.
 
-如果上游轮换协议或密钥，可在设置中配置 `signer_url` 覆盖内置实现。签名服务接收 JSON：
+If the upstream protocol or key changes, configure `signer_url` in the settings to override the built-in implementation. The signing service receives JSON in this format:
 
 ```json
 {
@@ -135,16 +137,16 @@ curl http://localhost:8080/v1/chat/completions \
 }
 ```
 
-返回 `{"headers":{"X-AtomCode-Sig":"..."}}`。外部 signer 会接触 OAuth token，只应配置为受信任的 HTTPS 服务或本机回环地址。
+It must return `{"headers":{"X-AtomCode-Sig":"..."}}`. An external signer receives the OAuth token, so configure only a trusted HTTPS service or a local loopback address.
 
-## 安全与运维
+## Security and Operations
 
-- 不要提交 `config.json`、`data/` 或 API Key；这些路径已加入 `.gitignore`。
-- 公网部署必须置于 HTTPS 反向代理之后，并修改默认管理密码。
-- 备份时必须同时保存 `config.json` 和 `data/`；丢失 `encryption_key` 后现有 OAuth token 无法解密。
-- 本项目非 AtomGit/AtomCode 官方项目。使用前请确认你的调用方式符合账号套餐和服务条款。
+- Do not commit `config.json`, `data/`, or API keys. These paths are included in `.gitignore`.
+- Any public deployment must sit behind an HTTPS reverse proxy and use a password other than the default administrator password.
+- Back up `config.json` and `data/` together. Existing OAuth tokens cannot be decrypted if the `encryption_key` is lost.
+- This is not an official AtomGit/AtomCode project. Before using it, confirm that your request patterns comply with your account plan and the applicable terms of service.
 
-## 验证
+## Verification
 
 ```bash
 go test -count=1 -cover ./...
@@ -152,4 +154,4 @@ go vet ./...
 cd frontend && npm run build
 ```
 
-测试覆盖凭据加密、API Key 摘要、Coding Plan 领取级联与同步、签名 fixture、非流式/流式代理用量、服务端管理会话和配置热加载。
+The test suite covers credential encryption, API key digests, Coding Plan claim fallback and synchronization, signing fixtures, non-streaming and streaming proxy usage, server-side management sessions, and live configuration reloads.
