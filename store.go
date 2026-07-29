@@ -176,38 +176,43 @@ func (a Account) View() AccountView {
 }
 
 type APIKey struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Prefix        string     `json:"prefix"`
-	Hash          string     `json:"hash"`
-	Enabled       bool       `json:"enabled"`
-	AllowedModels []string   `json:"allowed_models,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
-	RequestCount  int64      `json:"request_count"`
-	InputTokens   int64      `json:"input_tokens"`
-	OutputTokens  int64      `json:"output_tokens"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	Prefix           string     `json:"prefix"`
+	Hash             string     `json:"hash"`
+	Enabled          bool       `json:"enabled"`
+	AllowedModels    []string   `json:"allowed_models,omitempty"`
+	RPMLimit         int        `json:"rpm_limit"`
+	ConcurrencyLimit int        `json:"concurrency_limit"`
+	CreatedAt        time.Time  `json:"created_at"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt       *time.Time `json:"last_used_at,omitempty"`
+	RequestCount     int64      `json:"request_count"`
+	InputTokens      int64      `json:"input_tokens"`
+	OutputTokens     int64      `json:"output_tokens"`
 }
 
 type APIKeyView struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Prefix        string     `json:"prefix"`
-	Enabled       bool       `json:"enabled"`
-	AllowedModels []string   `json:"allowed_models,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
-	RequestCount  int64      `json:"request_count"`
-	InputTokens   int64      `json:"input_tokens"`
-	OutputTokens  int64      `json:"output_tokens"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	Prefix           string     `json:"prefix"`
+	Enabled          bool       `json:"enabled"`
+	AllowedModels    []string   `json:"allowed_models,omitempty"`
+	RPMLimit         int        `json:"rpm_limit"`
+	ConcurrencyLimit int        `json:"concurrency_limit"`
+	CreatedAt        time.Time  `json:"created_at"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt       *time.Time `json:"last_used_at,omitempty"`
+	RequestCount     int64      `json:"request_count"`
+	InputTokens      int64      `json:"input_tokens"`
+	OutputTokens     int64      `json:"output_tokens"`
 }
 
 func (key APIKey) View() APIKeyView {
 	return APIKeyView{
 		ID: key.ID, Name: key.Name, Prefix: key.Prefix, Enabled: key.Enabled,
-		AllowedModels: append([]string(nil), key.AllowedModels...), CreatedAt: key.CreatedAt,
+		AllowedModels: append([]string(nil), key.AllowedModels...), RPMLimit: key.RPMLimit,
+		ConcurrencyLimit: key.ConcurrencyLimit, CreatedAt: key.CreatedAt,
 		ExpiresAt: key.ExpiresAt, LastUsedAt: key.LastUsedAt, RequestCount: key.RequestCount,
 		InputTokens: key.InputTokens, OutputTokens: key.OutputTokens,
 	}
@@ -594,6 +599,13 @@ func (s *Store) DeleteAccount(id string) error {
 }
 
 func (s *Store) CreateAPIKey(name string, allowedModels []string, expiresAt *time.Time) (APIKeyView, string, error) {
+	return s.CreateAPIKeyWithLimits(name, allowedModels, expiresAt, 0, 0)
+}
+
+func (s *Store) CreateAPIKeyWithLimits(name string, allowedModels []string, expiresAt *time.Time, rpmLimit, concurrencyLimit int) (APIKeyView, string, error) {
+	if rpmLimit < 0 || concurrencyLimit < 0 {
+		return APIKeyView{}, "", errors.New("API key limits cannot be negative")
+	}
 	random := make([]byte, 32)
 	if _, err := rand.Read(random); err != nil {
 		return APIKeyView{}, "", err
@@ -604,7 +616,7 @@ func (s *Store) CreateAPIKey(name string, allowedModels []string, expiresAt *tim
 	key := APIKey{
 		ID: randomID("key"), Name: strings.TrimSpace(name), Prefix: secret[:18] + "...",
 		Hash: hex.EncodeToString(digest[:]), Enabled: true, AllowedModels: uniqueStrings(allowedModels),
-		CreatedAt: now, ExpiresAt: expiresAt,
+		RPMLimit: rpmLimit, ConcurrencyLimit: concurrencyLimit, CreatedAt: now, ExpiresAt: expiresAt,
 	}
 	if key.Name == "" {
 		key.Name = "API Key"
@@ -648,6 +660,13 @@ func (s *Store) AuthenticateAPIKey(secret string) (APIKey, bool) {
 }
 
 func (s *Store) UpdateAPIKey(id string, name *string, enabled *bool, allowedModels *[]string, expiresAt **time.Time) (APIKeyView, error) {
+	return s.UpdateAPIKeyWithLimits(id, name, enabled, allowedModels, expiresAt, nil, nil)
+}
+
+func (s *Store) UpdateAPIKeyWithLimits(id string, name *string, enabled *bool, allowedModels *[]string, expiresAt **time.Time, rpmLimit, concurrencyLimit *int) (APIKeyView, error) {
+	if (rpmLimit != nil && *rpmLimit < 0) || (concurrencyLimit != nil && *concurrencyLimit < 0) {
+		return APIKeyView{}, errors.New("API key limits cannot be negative")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.state.APIKeys {
@@ -663,6 +682,12 @@ func (s *Store) UpdateAPIKey(id string, name *string, enabled *bool, allowedMode
 		}
 		if allowedModels != nil {
 			key.AllowedModels = uniqueStrings(*allowedModels)
+		}
+		if rpmLimit != nil {
+			key.RPMLimit = *rpmLimit
+		}
+		if concurrencyLimit != nil {
+			key.ConcurrencyLimit = *concurrencyLimit
 		}
 		if expiresAt != nil {
 			key.ExpiresAt = *expiresAt
