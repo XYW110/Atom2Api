@@ -30,8 +30,9 @@ import {
   Tabs,
   Tooltip,
 } from '@heroui/react';
-import { apiFetch, type AuditListResponse, type AuditRecordDetail, type AuditRecordSummary, formatTokens } from '../api';
+import { apiFetch, type AuditListResponse, type AuditRecordDetail, type AuditRecordSummary, errorMessage, formatTokens } from '../api';
 import { EmptyState, PageShell } from '../components/PageShell';
+import { useToast } from '../components/Toast';
 
 const PAGE_SIZE = 20;
 const emptyResult: AuditListResponse = { items: [], total: 0, page: 1, page_size: PAGE_SIZE, pages: 0 };
@@ -79,12 +80,18 @@ function readableBody(body?: string) {
 function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: string; copyLabel: string }) {
   const [copied, setCopied] = useState(false);
   const formatted = useMemo(() => readableBody(body), [body]);
+  const { showToast } = useToast();
 
   const copy = async () => {
     if (!body) return;
-    await navigator.clipboard.writeText(body);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopied(true);
+      showToast('success', '复制成功', `${copyLabel.replace('复制', '')}已复制到剪贴板`);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch (copyError) {
+      showToast('error', '复制失败', errorMessage(copyError, '请手动选择并复制内容'));
+    }
   };
 
   if (!body) {
@@ -125,6 +132,7 @@ export default function AuditPage() {
   const [detail, setDetail] = useState<AuditRecordDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const { showToast } = useToast();
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -134,7 +142,7 @@ export default function AuditPage() {
     return () => window.clearTimeout(timer);
   }, [query]);
 
-  const load = useCallback(async (silent = false) => {
+  const load = useCallback(async (silent = false, notify = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
     const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
     if (debouncedQuery) params.set('q', debouncedQuery);
@@ -143,13 +151,16 @@ export default function AuditPage() {
     try {
       setData(await apiFetch<AuditListResponse>(`/api/audit?${params.toString()}`));
       setError('');
+      if (notify) showToast('success', '刷新成功', '审计记录已更新');
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : '无法加载审计记录');
+      const message = errorMessage(requestError, '无法加载审计记录');
+      setError(message);
+      if (notify) showToast('error', '刷新失败', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [debouncedQuery, method, page, status]);
+  }, [debouncedQuery, method, page, showToast, status]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -212,7 +223,7 @@ export default function AuditPage() {
             </select>
           </div>
           <Tooltip content="刷新审计记录">
-            <Button isIconOnly aria-label="刷新审计记录" className="ml-auto" isLoading={refreshing} radius="sm" variant="bordered" onPress={() => void load(true)}><RefreshCw size={16} /></Button>
+            <Button isIconOnly aria-label="刷新审计记录" className="ml-auto" isLoading={refreshing} radius="sm" variant="bordered" onPress={() => void load(true, true)}><RefreshCw size={16} /></Button>
           </Tooltip>
         </div>
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, ExternalLink, Pause, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
 import { EmptyState, PageShell } from '../components/PageShell';
@@ -35,6 +35,7 @@ export default function AccountsPage() {
   const [busy, setBusy] = useState('');
   const [oauth, setOAuth] = useState<OAuthState | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
+  const oauthErrorNotified = useRef(false);
   const oauthModal = useDisclosure();
   const deleteModal = useDisclosure();
   const { showToast } = useToast();
@@ -63,6 +64,7 @@ export default function AccountsPage() {
       try {
         const result = await apiFetch<{ status: OAuthState['status']; account?: Account }>(`/api/oauth/${oauth.id}`);
         if (!active) return;
+        oauthErrorNotified.current = false;
         setOAuth((current) => current ? { ...current, status: result.status } : current);
         if (result.status === 'complete') {
           await load();
@@ -71,7 +73,14 @@ export default function AccountsPage() {
           showToast('error', '账号连接失败', '授权会话已过期，请重新发起连接');
         }
       } catch (requestError) {
-        if (active) setError(requestError instanceof Error ? requestError.message : 'OAuth 状态检查失败');
+        if (active) {
+          const message = errorMessage(requestError, 'OAuth 状态检查失败');
+          setError(message);
+          if (!oauthErrorNotified.current) {
+            oauthErrorNotified.current = true;
+            showToast('error', '授权状态检查失败', message);
+          }
+        }
       } finally {
         polling = false;
       }
@@ -89,6 +98,7 @@ export default function AccountsPage() {
   const startOAuth = async () => {
     setBusy('oauth');
     setError('');
+    oauthErrorNotified.current = false;
     try {
       const session = await apiFetch<Omit<OAuthState, 'status'>>('/api/oauth/start', jsonRequest('POST'));
       setOAuth({ ...session, status: 'pending' });
