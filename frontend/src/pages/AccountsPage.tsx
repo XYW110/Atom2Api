@@ -19,13 +19,8 @@ interface OAuthState {
   status: 'pending' | 'complete' | 'expired';
 }
 
-interface ResetRefreshState {
-  resetAt: string;
-  retryAt: number;
-  inFlight: boolean;
-}
-
-const RESET_REFRESH_RETRY_MS = 15_000;
+const RESET_DATA_RELOAD_DELAY_MS = 5_000;
+const RESET_DATA_RELOAD_RETRY_MS = 5_000;
 
 function accountUsage(account: Account) {
   const visible = (account.plan.rate_limit_windows || []).filter((window) => window.show_enable === 1).sort((a, b) => a.window_size_seconds - b.window_size_seconds)[0];
@@ -79,7 +74,7 @@ export default function AccountsPage() {
   const [snapshotAt, setSnapshotAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const oauthErrorNotified = useRef(false);
-  const resetRefreshState = useRef(new Map<string, ResetRefreshState>());
+  const nextResetReloadAt = useRef(0);
   const oauthModal = useDisclosure();
   const deleteModal = useDisclosure();
   const { showToast } = useToast();
@@ -107,34 +102,14 @@ export default function AccountsPage() {
   }, []);
 
   useEffect(() => {
-    const accountIDs = new Set(accounts.map((account) => account.id));
-    for (const accountID of resetRefreshState.current.keys()) {
-      if (!accountIDs.has(accountID)) resetRefreshState.current.delete(accountID);
-    }
-
-    for (const account of accounts) {
+    const resetDataShouldReload = accounts.some((account) => {
       const usage = accountUsage(account);
-      if (!usage.resetAt || resetTargetTime(usage.resetAt, usage.secondsUntilReset, snapshotAt) > now) continue;
-
-      const refreshState = resetRefreshState.current.get(account.id);
-      const waitingToRetry = refreshState?.resetAt === usage.resetAt && (refreshState.inFlight || refreshState.retryAt > now);
-      if (waitingToRetry || busy === `sync:${account.id}`) continue;
-
-      resetRefreshState.current.set(account.id, { resetAt: usage.resetAt, retryAt: now + RESET_REFRESH_RETRY_MS, inFlight: true });
-      void apiFetch<Account>(`/api/accounts/${account.id}/sync`, jsonRequest('POST'))
-        .then((refreshedAccount) => {
-          const refreshedAt = Date.now();
-          setAccounts((current) => current.map((item) => item.id === refreshedAccount.id ? refreshedAccount : item));
-          setSnapshotAt(refreshedAt);
-          setNow(refreshedAt);
-        })
-        .catch(() => load())
-        .finally(() => {
-          const current = resetRefreshState.current.get(account.id);
-          if (current?.resetAt === usage.resetAt) resetRefreshState.current.set(account.id, { ...current, inFlight: false });
-        });
-    }
-  }, [accounts, busy, load, now, snapshotAt]);
+      return usage.resetAt && resetTargetTime(usage.resetAt, usage.secondsUntilReset, snapshotAt) + RESET_DATA_RELOAD_DELAY_MS <= now;
+    });
+    if (!resetDataShouldReload || nextResetReloadAt.current > now) return;
+    nextResetReloadAt.current = now + RESET_DATA_RELOAD_RETRY_MS;
+    void load();
+  }, [accounts, load, now, snapshotAt]);
 
   useEffect(() => {
     if (!oauth || oauth.status !== 'pending') return undefined;
