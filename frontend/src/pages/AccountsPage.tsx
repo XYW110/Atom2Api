@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, ExternalLink, Pause, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, Copy, ExternalLink, Pause, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
@@ -34,6 +34,7 @@ export default function AccountsPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [oauth, setOAuth] = useState<OAuthState | null>(null);
+  const [oauthCopied, setOAuthCopied] = useState(false);
   const [deleting, setDeleting] = useState<Account | null>(null);
   const oauthErrorNotified = useRef(false);
   const oauthModal = useDisclosure();
@@ -98,17 +99,28 @@ export default function AccountsPage() {
   const startOAuth = async () => {
     setBusy('oauth');
     setError('');
+    setOAuthCopied(false);
     oauthErrorNotified.current = false;
     try {
       const session = await apiFetch<Omit<OAuthState, 'status'>>('/api/oauth/start', jsonRequest('POST'));
       setOAuth({ ...session, status: 'pending' });
       oauthModal.onOpen();
-      window.open(session.login_url, '_blank', 'noopener,noreferrer');
-      showToast('success', '授权流程已启动', '请在浏览器中完成 AtomGit 授权');
+      showToast('success', '授权流程已启动', '可复制 OAuth 链接，或直接前往 AtomGit 授权');
     } catch (requestError) {
       showToast('error', '无法启动授权', errorMessage(requestError, '请稍后重试'));
     } finally {
       setBusy('');
+    }
+  };
+
+  const copyOAuthURL = async () => {
+    if (!oauth?.login_url) return;
+    try {
+      await navigator.clipboard.writeText(oauth.login_url);
+      setOAuthCopied(true);
+      showToast('success', '复制成功', 'OAuth 链接已复制到剪贴板');
+    } catch (copyError) {
+      showToast('error', '复制失败', errorMessage(copyError, '请手动选择并复制 OAuth 链接'));
     }
   };
 
@@ -200,7 +212,7 @@ export default function AccountsPage() {
       </section>
 
       <Modal isOpen={oauthModal.isOpen} radius="sm" onOpenChange={oauthModal.onOpenChange}>
-        <ModalContent>{(onClose) => <><ModalHeader>连接 AtomGit</ModalHeader><ModalBody>{oauth?.status === 'complete' ? <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><CheckCircle2 className="shrink-0" size={19} /><span>授权完成，账号权益与模型已同步。</span></div> : oauth?.status === 'expired' ? <div className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700"><AlertCircle className="shrink-0" size={19} /><span>授权会话已过期，请重新发起连接。</span></div> : <div className="space-y-4"><div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800"><span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" /><span>等待浏览器完成 AtomGit 授权...</span></div><Button as="a" color="primary" endContent={<ExternalLink size={16} />} href={oauth?.login_url} radius="sm" rel="noreferrer" target="_blank" variant="flat">打开授权页面</Button></div>}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>{oauth?.status === 'complete' ? '完成' : '关闭'}</Button></ModalFooter></>}</ModalContent>
+        <ModalContent>{(onClose) => <><ModalHeader>连接 AtomGit</ModalHeader><ModalBody>{oauth?.status === 'complete' ? <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><CheckCircle2 className="shrink-0" size={19} /><span>授权完成，账号权益与模型已同步。</span></div> : oauth?.status === 'expired' ? <div className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700"><AlertCircle className="shrink-0" size={19} /><span>授权会话已过期，请重新发起连接。</span></div> : <div className="space-y-4"><div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800"><span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" /><span>授权链接已生成，请复制链接或前往 AtomGit 完成授权。</span></div><div className="flex items-center gap-2"><Input isReadOnly aria-label="AtomGit OAuth 链接" classNames={{ input: 'font-mono text-xs' }} radius="sm" value={oauth?.login_url || ''} /><Tooltip content={oauthCopied ? '已复制' : '复制 OAuth 链接'}><Button isIconOnly aria-label="复制 OAuth 链接" color={oauthCopied ? 'success' : 'primary'} radius="sm" variant="flat" onPress={() => void copyOAuthURL()}>{oauthCopied ? <Check size={17} /> : <Copy size={17} />}</Button></Tooltip></div><Button as="a" color="primary" endContent={<ExternalLink size={16} />} href={oauth?.login_url} radius="sm" rel="noreferrer" target="_blank">前往 AtomGit 授权</Button></div>}</ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>{oauth?.status === 'complete' ? '完成' : '关闭'}</Button></ModalFooter></>}</ModalContent>
       </Modal>
 
       <Modal isOpen={deleteModal.isOpen} radius="sm" size="sm" onOpenChange={deleteModal.onOpenChange}>
