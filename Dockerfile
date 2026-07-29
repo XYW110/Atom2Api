@@ -7,7 +7,7 @@ RUN npm run build
 
 FROM golang:1.22-alpine AS backend
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY *.go ./
 COPY --from=frontend /src/frontend/dist ./frontend/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/atom2api .
