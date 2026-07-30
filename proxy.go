@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,9 @@ type Proxy struct {
 	router *ModelRouter
 	oauth  *OAuthManager
 	client *http.Client
+
+	responsesMu   sync.RWMutex
+	responsesChat map[string]struct{}
 }
 
 type tokenUsage struct {
@@ -34,6 +38,21 @@ type tokenUsage struct {
 	Output    int64
 	Cached    int64
 	Reasoning int64
+}
+
+type upstreamRequestError struct {
+	code string
+	err  error
+}
+
+func (e *upstreamRequestError) Error() string { return e.err.Error() }
+
+func upstreamRequestErrorCode(err error) string {
+	var requestError *upstreamRequestError
+	if errors.As(err, &requestError) && requestError.code != "" {
+		return requestError.code
+	}
+	return "upstream_error"
 }
 
 type auditResponseWriter struct {
@@ -88,6 +107,7 @@ func NewProxy(config *ConfigManager, store *Store, router *ModelRouter, oauth *O
 				return errors.New("upstream redirects are disabled")
 			},
 		},
+		responsesChat: map[string]struct{}{},
 	}
 }
 
@@ -198,51 +218,75 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		writeOpenAIError(w, http.StatusInternalServerError, "server_error", "could not encode upstream request")
 		return
 	}
-	upstreamURL, err := joinUpstreamURL(route.Model.BaseURL, r.URL.Path)
-	if err != nil {
-		audit.Error = err.Error()
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", err.Error())
-		return
-	}
 	timeout := time.Duration(p.config.Snapshot().RequestTimeoutSecs) * time.Second
 	requestContext, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	requestPath := r.URL.Path
+	requestBody := body
+	var compatContext *responsesCompatContext
+	responsesFallback := r.URL.Path == "/v1/responses" && p.usesResponsesChatFallback(route)
+	if responsesFallback {
+		requestBody, compatContext, err = responsesRequestToChat(payload)
+		if err != nil {
+			audit.Error = err.Error()
+			writeOpenAIError(w, http.StatusBadRequest, "unsupported_parameter", audit.Error)
+			return
+		}
+		requestPath = "/v1/chat/completions"
+	}
+	request, response, err := p.doUpstreamRequest(requestContext, route, requestPath, requestBody, streaming)
 	if err != nil {
 		audit.Error = err.Error()
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		writeOpenAIError(w, http.StatusBadGateway, upstreamRequestErrorCode(err), audit.Error)
 		return
 	}
-	request.Header.Set("Authorization", "Bearer "+route.Token)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	if streaming {
-		request.Header.Set("Accept", "text/event-stream")
+	if r.URL.Path == "/v1/responses" && !responsesFallback && responsesEndpointUnsupported(response.StatusCode) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+		_ = response.Body.Close()
+		requestBody, compatContext, err = responsesRequestToChat(payload)
+		if err != nil {
+			audit.Error = err.Error()
+			writeOpenAIError(w, http.StatusBadRequest, "unsupported_parameter", audit.Error)
+			return
+		}
+		responsesFallback = true
+		request, response, err = p.doUpstreamRequest(requestContext, route, "/v1/chat/completions", requestBody, streaming)
+		if err != nil {
+			audit.Error = err.Error()
+			writeOpenAIError(w, http.StatusBadGateway, upstreamRequestErrorCode(err), audit.Error)
+			return
+		}
 	}
-	request.Header.Set("User-Agent", p.config.Snapshot().UserAgent)
-	request.Header.Set("X-Request-Id", randomID("req"))
-	if err := p.applySignature(r.Context(), request, body, route); err != nil {
-		audit.Error = err.Error()
-		writeOpenAIError(w, http.StatusBadGateway, "signing_error", audit.Error)
-		return
+	defer response.Body.Close()
+	if responsesFallback && response.StatusCode >= 200 && response.StatusCode < 300 {
+		p.rememberResponsesChatFallback(route)
 	}
 	if debugEnabled {
 		audit.RequestHeaders = auditHeaders(request.Header)
 	}
-	response, err := p.client.Do(request)
-	if err != nil {
-		message := "upstream request failed: " + err.Error()
-		audit.Error = message
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", message)
-		return
-	}
-	defer response.Body.Close()
 	if debugEnabled || response.StatusCode != http.StatusOK {
 		captured.captureBody = true
 		audit.ResponseHeaders = auditHeaders(response.Header)
 	}
 	copyUpstreamHeaders(w.Header(), response.Header)
 	w.Header().Set("X-Atom2api-Account", route.Account.ID)
+	if responsesFallback {
+		w.Header().Set(responsesFallbackHeader, "chat-completions")
+	}
+	if responsesFallback && response.StatusCode >= 200 && response.StatusCode < 300 {
+		if streaming {
+			usage, errorText := p.streamChatAsResponses(w, response, route, compatContext)
+			audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
+			audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
+			audit.Error = errorText
+			return
+		}
+		usage, errorText := p.bufferedChatAsResponses(w, response, route, compatContext)
+		audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
+		audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
+		audit.Error = errorText
+		return
+	}
 	if streaming && response.StatusCode >= 200 && response.StatusCode < 300 {
 		usage, errorText := p.streamResponse(w, response, route)
 		audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
@@ -254,6 +298,71 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 	audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
 	audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
 	audit.Error = errorText
+}
+
+func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path string, body []byte, streaming bool) (*http.Request, *http.Response, error) {
+	upstreamURL, err := joinUpstreamURL(route.Model.BaseURL, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+route.Token)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	if streaming {
+		request.Header.Set("Accept", "text/event-stream")
+	}
+	request.Header.Set("User-Agent", p.config.Snapshot().UserAgent)
+	request.Header.Set("X-Request-Id", randomID("req"))
+	if err := p.applySignature(ctx, request, body, route); err != nil {
+		return request, nil, &upstreamRequestError{code: "signing_error", err: fmt.Errorf("sign upstream request: %w", err)}
+	}
+	response, err := p.client.Do(request)
+	if err != nil {
+		return request, nil, &upstreamRequestError{code: "upstream_error", err: fmt.Errorf("upstream request failed: %w", err)}
+	}
+	return request, response, nil
+}
+
+func (p *Proxy) bufferedChatAsResponses(w http.ResponseWriter, response *http.Response, route ModelRoute, context *responsesCompatContext) (tokenUsage, string) {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "could not read upstream response")
+		return tokenUsage{}, "could not read upstream response"
+	}
+	converted, usage, err := chatResponseToResponses(body, route.Requested, context)
+	if err != nil {
+		message := "could not convert Chat Completions response: " + err.Error()
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", message)
+		return tokenUsage{}, message
+	}
+	w.Header().Del("Content-Length")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, _ = w.Write(converted)
+	return usage, ""
+}
+
+func (p *Proxy) usesResponsesChatFallback(route ModelRoute) bool {
+	key := route.Model.BaseURL + "\x00" + route.Upstream
+	p.responsesMu.RLock()
+	_, exists := p.responsesChat[key]
+	p.responsesMu.RUnlock()
+	return exists
+}
+
+func (p *Proxy) rememberResponsesChatFallback(route ModelRoute) {
+	key := route.Model.BaseURL + "\x00" + route.Upstream
+	p.responsesMu.Lock()
+	p.responsesChat[key] = struct{}{}
+	p.responsesMu.Unlock()
+}
+
+func responsesEndpointUnsupported(status int) bool {
+	return status == http.StatusNotFound || status == http.StatusMethodNotAllowed || status == http.StatusNotImplemented
 }
 
 func (p *Proxy) bufferedResponse(w http.ResponseWriter, response *http.Response, route ModelRoute) (tokenUsage, string) {

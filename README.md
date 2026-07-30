@@ -31,6 +31,12 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 - Dashboard: request trends, request counts, input/output tokens, success rate, latency, model distribution, and recent requests
 - Single-binary deployment: embeds the React console in the Go service and also provides Docker and Compose configurations
 
+### Responses API Compatibility Fallback
+
+`/v1/responses` first calls the model's native upstream endpoint. If that endpoint returns 404, 405, or 501, Atom2Api retries the same model through `/v1/chat/completions` and converts the request, buffered response, and streaming SSE back to the Responses API. After a successful conversion, the model capability is cached for the lifetime of the process. The response header `X-Atom2api-Responses-Compat: chat-completions` identifies requests served by this fallback.
+
+The compatibility layer supports text, image URLs, function tools, JSON Schema, usage, and streaming events. Chat Completions cannot provide equivalent server-side state such as `store=true` or `previous_response_id`, or OpenAI built-in tools; those inputs return `400 unsupported_parameter` instead of being silently ignored.
+
 ## Local Development
 
 Requires Go 1.22+ and Node.js 20+.
@@ -153,6 +159,12 @@ It must return `{"headers":{"X-AtomCode-Sig":"..."}}`. An external signer receiv
 go test -count=1 -cover ./...
 go vet ./...
 cd frontend && npm run build
+```
+
+Run the live non-streaming, streaming, and function-tool Responses checks against `GLM-5.2` with the account in the current `config.json`:
+
+```bash
+ATOM2API_LIVE_GLM=1 go test -run TestManualGLMResponsesFallback -count=1 -v
 ```
 
 The test suite covers credential encryption, API key digests, Coding Plan claim fallback and synchronization, signing fixtures, non-streaming and streaming proxy usage, server-side management sessions, and live configuration reloads.
