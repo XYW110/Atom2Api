@@ -156,3 +156,7 @@ cd frontend && npm run build
 ```
 
 The test suite covers credential encryption, API key digests, Coding Plan claim fallback and synchronization, signing fixtures, non-streaming and streaming proxy usage, server-side management sessions, and live configuration reloads.
+
+## Acknowledgements
+
+Our sincere thanks to every member of the [Linux.do](https://linux.do/) community. Your sincerity, kindness, solidarity, and professionalism are what make this community so vibrant.

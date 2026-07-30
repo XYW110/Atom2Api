@@ -156,3 +156,7 @@ cd frontend && npm run build
 ```
 
 测试覆盖凭据加密、API Key 摘要、Coding Plan 领取级联与同步、签名 fixture、非流式/流式代理用量、服务端管理会话和配置热加载。
+
+## 致谢
+
+衷心感谢 [Linux.do](https://linux.do/) 社区的所有成员。是你们的真诚、友善、团结与专业，让这个社区始终充满活力。
