@@ -30,6 +30,9 @@ func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
 			if request["model"] != "upstream-model" || request["max_tokens"] != float64(64) {
 				t.Errorf("Chat request = %#v", request)
 			}
+			if _, exists := request["prompt_cache_key"]; exists {
+				t.Errorf("Chat request contains Responses-only prompt_cache_key: %#v", request)
+			}
 			messages, _ := request["messages"].([]any)
 			if len(messages) != 2 || messages[0].(map[string]any)["role"] != "system" || messages[1].(map[string]any)["content"] != "hello" {
 				t.Errorf("Chat messages = %#v", messages)
@@ -53,7 +56,7 @@ func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
 	}
 	router := NewModelRouter(store)
 	proxy := NewProxy(config, store, router, nil)
-	payload := `{"model":"gpt-responses","instructions":"Be concise","input":"hello","max_output_tokens":64,"store":false,"tools":[{"type":"function","name":"weather","description":"Get weather","parameters":{"type":"object"},"strict":true}]}`
+	payload := `{"model":"gpt-responses","instructions":"Be concise","input":"hello","max_output_tokens":64,"prompt_cache_key":"session-42","store":false,"tools":[{"type":"function","name":"weather","description":"Get weather","parameters":{"type":"object"},"strict":true}]}`
 
 	for index := 0; index < 2; index++ {
 		request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(payload))
@@ -71,6 +74,9 @@ func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
 		}
 		if body["object"] != "response" || body["model"] != "gpt-responses" || body["status"] != "completed" {
 			t.Fatalf("Responses body = %#v", body)
+		}
+		if body["prompt_cache_key"] != "session-42" {
+			t.Fatalf("Responses prompt_cache_key = %#v", body["prompt_cache_key"])
 		}
 		output := body["output"].([]any)
 		content := output[0].(map[string]any)["content"].([]any)

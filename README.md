@@ -35,7 +35,7 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 
 `/v1/responses` first calls the model's native upstream endpoint. If that endpoint returns 404, 405, or 501, Atom2Api retries the same model through `/v1/chat/completions` and converts the request, buffered response, and streaming SSE back to the Responses API. After a successful conversion, the model capability is cached for the lifetime of the process. The response header `X-Atom2api-Responses-Compat: chat-completions` identifies requests served by this fallback.
 
-The compatibility layer supports text, image URLs, function tools, JSON Schema, usage, and streaming events. Chat Completions cannot provide equivalent server-side state such as `store=true` or `previous_response_id`, or OpenAI built-in tools; those inputs return `400 unsupported_parameter` instead of being silently ignored.
+The compatibility layer supports text, image URLs, function tools, JSON Schema, usage, and streaming events. It accepts `prompt_cache_key` but does not forward this cache-routing hint to Chat Completions. Chat Completions cannot provide equivalent server-side state such as `store=true` or `previous_response_id`, or OpenAI built-in tools; those inputs return `400 unsupported_parameter` instead of being silently ignored.
 
 ## Local Development
 

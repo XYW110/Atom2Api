@@ -35,7 +35,7 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 
 `/v1/responses` 默认先请求模型的原生上游。若上游返回 404、405 或 501，Atom2Api 会使用同一模型改调 `/v1/chat/completions`，并将请求、普通响应和流式 SSE 转换回 Responses API；转换成功后会在当前进程内记住该模型的能力。响应头 `X-Atom2api-Responses-Compat: chat-completions` 表示本次请求使用了兼容回退。
 
-兼容层支持文本、图片 URL、函数工具、JSON Schema、用量和流式事件。Chat Completions 无法等价提供的服务端状态（例如 `store=true`、`previous_response_id`）和 OpenAI 内置工具会返回 `400 unsupported_parameter`，不会被静默忽略。
+兼容层支持文本、图片 URL、函数工具、JSON Schema、用量和流式事件。兼容层会接受 `prompt_cache_key`，但不会把这一缓存路由提示转发给 Chat Completions。Chat Completions 无法等价提供的服务端状态（例如 `store=true`、`previous_response_id`）和 OpenAI 内置工具会返回 `400 unsupported_parameter`，不会被静默忽略。
 
 ## 本地运行
 

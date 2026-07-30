@@ -137,6 +137,7 @@ func validateResponsesFallbackRequest(request map[string]any) error {
 		"tools": true, "tool_choice": true, "parallel_tool_calls": true,
 		"text": true, "reasoning": true, "metadata": true, "store": true,
 		"service_tier": true, "user": true, "include": true,
+		"prompt_cache_key": true,
 	}
 	for name, value := range request {
 		if !allowed[name] && value != nil {
@@ -426,7 +427,7 @@ func buildResponsesEnvelope(context *responsesCompatContext, id string, created 
 		"max_output_tokens": valueOrNil(request, "max_output_tokens"), "max_tool_calls": nil,
 		"metadata": valueOrDefault(request, "metadata", map[string]any{}), "model": model,
 		"output": output, "parallel_tool_calls": valueOrDefault(request, "parallel_tool_calls", true),
-		"previous_response_id": nil, "prompt": nil, "prompt_cache_key": nil,
+		"previous_response_id": nil, "prompt": nil, "prompt_cache_key": valueOrNil(request, "prompt_cache_key"),
 		"reasoning":         valueOrDefault(request, "reasoning", map[string]any{"effort": nil, "summary": nil}),
 		"safety_identifier": nil, "service_tier": valueOrDefault(request, "service_tier", "default"),
 		"store": false, "temperature": valueOrDefault(request, "temperature", 1.0),
