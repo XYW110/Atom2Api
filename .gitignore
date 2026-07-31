@@ -4,6 +4,7 @@ data/
 
 # Local builds and integration artifacts
 .tmp-integration/
+/dist/
 atom2api
 atom2api.exe
 

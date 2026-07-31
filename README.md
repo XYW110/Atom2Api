@@ -74,6 +74,26 @@ docker compose up -d --build
 
 Data is stored in the `atom2api-data` volume. After the first launch, open the console and change the default password.
 
+## Releases
+
+Pushing a semantic-version tag such as `v1.2.0` triggers GitHub Actions to test the project, build the frontend, and publish a GitHub Release. The release contains Linux, Windows, and macOS packages for amd64 and arm64, together with `SHA256SUMS`.
+
+From a clean branch that is synchronized with its upstream, run the release helper with PowerShell 7:
+
+```powershell
+pwsh ./scripts/release.ps1 1.2.0
+```
+
+The helper validates the version, fetches tags, verifies the frontend and backend, creates an annotated `v1.2.0` tag, and pushes only that tag. Use `-DryRun` to perform all local checks without creating or pushing a tag. Release candidates such as `1.2.0-rc.1` are published as GitHub pre-releases.
+
+To build the same archives locally without publishing a release:
+
+```powershell
+pwsh ./scripts/build-artifacts.ps1 1.2.0
+```
+
+Run `atom2api --version` to inspect the version embedded in a release binary. Local development builds report `dev`.
+
 ## Usage
 
 1. Sign in to the console and open **Accounts**.

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 //go:embed all:frontend/dist
 var frontendAssets embed.FS
 
+var version = "dev"
+
 type healthResponse struct {
 	Status  string `json:"status"`
 	Service string `json:"service"`
@@ -26,6 +29,11 @@ type healthResponse struct {
 }
 
 func main() {
+	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println(version)
+		return
+	}
+
 	dist, err := fs.Sub(frontendAssets, "frontend/dist")
 	if err != nil {
 		log.Fatal(err)
@@ -149,7 +157,7 @@ func displayAddress(address string) string {
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(healthResponse{
-		Status: "ok", Service: "atom2api", Version: "1.0.2",
+		Status: "ok", Service: "atom2api", Version: version,
 	}); err != nil {
 		log.Printf("encode health response: %v", err)
 	}

@@ -74,6 +74,26 @@ docker compose up -d --build
 
 数据保存在 `atom2api-data` volume。首次启动后访问控制台修改默认密码。
 
+## 版本发布
+
+推送 `v1.2.0` 形式的语义化版本标签后，GitHub Actions 会自动执行测试、构建前端并发布 GitHub Release。Release 包含 Linux、Windows、macOS 的 amd64/arm64 压缩包以及 `SHA256SUMS` 校验文件。
+
+在已与上游同步且工作树干净的分支中，使用 PowerShell 7 运行发布脚本：
+
+```powershell
+pwsh ./scripts/release.ps1 1.2.0
+```
+
+脚本会校验版本、拉取远端标签、验证前后端、创建带说明的 `v1.2.0` 标签，并且只推送该标签。添加 `-DryRun` 可仅执行本地检查，不创建或推送标签。`1.2.0-rc.1` 等候选版本会发布为 GitHub 预发布版本。
+
+如需仅在本地生成同样的压缩包而不发布版本，可运行：
+
+```powershell
+pwsh ./scripts/build-artifacts.ps1 1.2.0
+```
+
+运行 `atom2api --version` 可查看发布二进制中注入的版本号；本地开发构建显示为 `dev`。
+
 ## 使用流程
 
 1. 登录控制台，进入“账号管理”。
