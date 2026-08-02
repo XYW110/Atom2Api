@@ -68,14 +68,14 @@ go run .
 
 ## Docker
 
-Compose 配置使用 Docker Hub 发布的 [`cnluminous/atom2api:1.0.2`](https://hub.docker.com/r/cnluminous/atom2api) 镜像，无需在本地构建镜像。
+Compose 配置使用 Docker Hub 发布的 [`cnluminous/atom2api:latest`](https://hub.docker.com/r/cnluminous/atom2api) 镜像，无需在本地构建镜像。
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-容器启动后访问 `http://localhost:8080`。数据保存在 `atom2api-data` volume。首次启动后访问控制台修改默认密码。
+容器启动后访问 `http://localhost:8080`。数据保存在本地 `data/` 目录。首次启动后访问控制台修改默认密码。
 
 ## 版本发布
 
@@ -98,6 +98,8 @@ pwsh ./scripts/build-artifacts.ps1 1.2.0
 ```
 
 运行 `atom2api --version` 可查看发布二进制中注入的版本号；本地开发构建显示为 `dev`。
+
+登录管理控制台后，侧边栏会显示当前运行版本，并检查 GitHub 最新稳定版 Release。如有新版本，会展示最新版本号和更新日志，并提供 GitHub Release 链接。检查由服务端执行并在短时间内缓存；此功能需要服务能够访问 `api.github.com`。
 
 ## 使用流程
 

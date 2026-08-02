@@ -72,6 +72,17 @@ export interface PlanClaimSchedule {
   cron: string;
 }
 
+export interface VersionInfo {
+  current_version: string;
+  latest_version?: string;
+  update_available: boolean;
+  release_url?: string;
+  release_notes?: string;
+  published_at?: string;
+  checked_at: string;
+  check_error?: string;
+}
+
 export interface CodingPlanClaimAttempt {
   plan_type: 'Max' | 'Pro' | 'Lite';
   http_status: number;

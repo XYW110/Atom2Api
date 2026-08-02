@@ -7,10 +7,11 @@ RUN npm run build
 
 FROM golang:1.22-alpine AS backend
 WORKDIR /src
+ARG VERSION=dev
 COPY go.mod go.sum ./
 COPY *.go ./
 COPY --from=frontend /src/frontend/dist ./frontend/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/atom2api .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/atom2api .
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates \

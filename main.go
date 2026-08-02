@@ -60,6 +60,7 @@ func main() {
 	models := NewModelRouter(store)
 	proxy := NewProxy(config, store, models, oauth)
 	api := NewAPI(store, oauth, codingPlan, models, proxy)
+	releaseChecker := NewReleaseChecker(version)
 	if err := api.planClaims.Start(); err != nil {
 		log.Fatal(err)
 	}
@@ -86,6 +87,7 @@ func main() {
 	adminMux.HandleFunc("POST /api/models", api.HandleCreateModel)
 	adminMux.HandleFunc("PUT /api/models/settings", api.HandleModelSetting)
 	adminMux.HandleFunc("DELETE /api/models/settings", api.HandleDeleteModel)
+	adminMux.HandleFunc("GET /api/version", releaseChecker.HandleVersion)
 	adminMux.HandleFunc("GET /api/settings", handleGetSettings(config))
 	adminMux.HandleFunc("PUT /api/settings", handleUpdateSettings(config))
 

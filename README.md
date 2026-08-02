@@ -68,14 +68,14 @@ go run .
 
 ## Docker
 
-The Compose configuration uses the published [`cnluminous/atom2api:1.0.2`](https://hub.docker.com/r/cnluminous/atom2api) image from Docker Hub, so no local image build is required.
+The Compose configuration uses the published [`cnluminous/atom2api:latest`](https://hub.docker.com/r/cnluminous/atom2api) image from Docker Hub, so no local image build is required.
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Open `http://localhost:8080` after the container starts. Data is stored in the `atom2api-data` volume. After the first launch, open the console and change the default password.
+Open `http://localhost:8080` after the container starts. Data is stored in the local `data/` directory. After the first launch, open the console and change the default password.
 
 ## Releases
 
@@ -98,6 +98,8 @@ pwsh ./scripts/build-artifacts.ps1 1.2.0
 ```
 
 Run `atom2api --version` to inspect the version embedded in a release binary. Local development builds report `dev`.
+
+After signing in, the management console displays the running version in the sidebar and checks the latest stable GitHub Release. When a newer version is available, it shows the latest version and release notes with a link to the GitHub Release. The check is performed by the server and cached for a short period; the service needs outbound access to `api.github.com` for this feature.
 
 ## Usage
 
