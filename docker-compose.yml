@@ -1,6 +1,6 @@
 services:
   atom2api:
-    image: docker.io/cnluminous/atom2api:1.0.2
+    image: cnluminous/atom2api:latest
     pull_policy: always
     restart: unless-stopped
     ports:
