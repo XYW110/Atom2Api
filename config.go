@@ -22,7 +22,7 @@ const (
 	defaultConfigPath       = "config.json"
 	defaultUserAgent        = "atomcode/5.0.2"
 	defaultListenAddress    = ":8080"
-	defaultDataPath         = "data/atom2api.json"
+	defaultDataPath         = "data/atom2api.db"
 	defaultAdminPassword    = "atom2api"
 	defaultPlatformBaseURL  = "https://acs.atomgit.com"
 	defaultCodingPlanAPIURL = "https://api.gitcode.com/api/v5"
@@ -134,6 +134,10 @@ func normalizeConfig(config *Config) (bool, error) {
 	setString(&config.UserAgent, defaultUserAgent)
 	setString(&config.ListenAddress, defaultListenAddress)
 	setString(&config.DataPath, defaultDataPath)
+	if strings.EqualFold(filepath.Ext(config.DataPath), ".json") {
+		config.DataPath = strings.TrimSuffix(config.DataPath, filepath.Ext(config.DataPath)) + ".db"
+		changed = true
+	}
 	setString(&config.AdminPassword, defaultAdminPassword)
 	setString(&config.PlatformBaseURL, defaultPlatformBaseURL)
 	setString(&config.CodingPlanAPIURL, defaultCodingPlanAPIURL)

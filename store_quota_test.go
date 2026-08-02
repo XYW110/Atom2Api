@@ -28,6 +28,11 @@ func TestRecordUsageUpdatesAccountRateLimitWindowsLocally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload store: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := reloaded.Close(); err != nil {
+			t.Errorf("close reloaded store: %v", err)
+		}
+	})
 	stored, _, _, err := reloaded.Account(account.ID)
 	if err != nil {
 		t.Fatalf("Account: %v", err)

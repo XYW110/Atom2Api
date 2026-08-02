@@ -12,7 +12,7 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 - **默认使用明文 HTTP**：Atom2Api 本身不提供 TLS。客户端与服务之间的提示词、代码、响应和 API Key 均可能以明文传输；默认监听地址 `:8080` 还可能使服务暴露给同一网络中的其他设备。非纯本机使用时，必须配置 HTTPS 反向代理、防火墙和严格的访问范围。
 - **默认管理密码不安全**：首次启动的管理密码为 `atom2api`。OpenAI 兼容接口虽要求使用已创建的 API Key，但任何能访问服务且知道默认密码的人都可能进入管理控制台。首次登录后必须立即修改密码，并妥善保管已签发的 API Key。
 - **本地数据包含敏感信息**：OAuth token 使用 AES-256-GCM 加密保存，API Key 仅保存 SHA-256 摘要；但 `config.json` 仍以明文保存管理密码、`encryption_key` 及可选的 `signer_token`。同时取得 `config.json` 和 `data/` 的进程或用户可以解密 OAuth 凭据，请严格限制这些文件的读取权限并一同安全备份。
-- **审计日志会保存请求内容**：`<data_path>.usage.ndjson` 以明文记录请求与响应正文，其中可能包含提示词、源代码、个人信息或其它秘密。请限制日志访问、控制备份范围，并按数据保留要求及时清理。
+- **审计日志可能保存请求内容**：开启审计调试后，SQLite 数据库会记录请求与响应正文；上游错误响应则始终记录。其中可能包含提示词、源代码、个人信息或其它秘密，请限制数据库访问、控制备份范围，并按数据保留要求及时清理。
 - **依赖非官方兼容实现**：本项目通过社区独立记录的签名兼容实现访问 AtomGit 上游，不属于 AtomGit/AtomCode 官方客户端或受支持集成。上游协议变更可能随时导致服务不可用，使用方式也可能带来账号限制或封禁风险。
 
 **免责声明**：本项目仅供学习和研究，不隶属于 AtomGit/AtomCode，也未获其官方认可。使用者需自行评估风险、遵守 AtomGit/AtomCode 的服务条款及适用法律，并对账号封禁、数据泄露、费用或其它损失承担全部责任。
@@ -140,7 +140,7 @@ curl http://localhost:8080/v1/chat/completions \
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `listen_address` | `:8080` | HTTP 监听地址；`PORT` 环境变量优先 |
-| `data_path` | `data/atom2api.json` | 账号、密钥摘要和计数状态 |
+| `data_path` | `data/atom2api.db` | 保存账号、密钥摘要、设置、计数和审计记录的 SQLite 数据库 |
 | `admin_password` | `atom2api` | 控制台管理密码 |
 | `encryption_key` | 首次启动随机生成 | OAuth token 加密密钥，不应更换或泄露 |
 | `platform_base_url` | `https://acs.atomgit.com` | OAuth broker |
@@ -150,7 +150,7 @@ curl http://localhost:8080/v1/chat/completions \
 | `audit_debug_enabled` | `false` | 开启后记录完整请求/响应正文及脱敏 Header |
 | `request_timeout_seconds` | `120` | 上游请求超时范围 5-600 秒 |
 
-主状态写入 `data_path`，请求明细以 NDJSON 追加到 `<data_path>.usage.ndjson`，内存和日志最多保留最近 50,000 条请求用于仪表盘聚合。默认只记录请求元数据与用量；开启审计调试模式后才保存请求/响应正文和 Header。无论调试模式是否开启，上游返回非 200 状态时都会保存其响应正文和 Header。认证、Cookie、Token、API Key 及签名 Header 的值会被脱敏。
+所有运行状态均写入 `data_path` 指向的 SQLite 数据库，包括账号、API Key、模型设置、领取日志，以及用于仪表盘聚合的最近 50,000 条请求记录。启动时如发现旧 JSON 状态文件及其 `<data_path>.usage.ndjson` 日志，会在事务中自动迁入数据库，并仅在事务提交成功后删除旧文件。默认只记录请求元数据与用量；开启审计调试模式后才保存请求/响应正文和 Header。无论调试模式是否开启，上游返回非 200 状态时都会保存其响应正文和 Header。认证、Cookie、Token、API Key 及签名 Header 的值会被脱敏。
 
 ## 签名兼容性
 

@@ -1,19 +1,17 @@
 package main
 
 import (
-	"bufio"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -301,153 +299,17 @@ type persistedState struct {
 }
 
 type Store struct {
-	path      string
-	usagePath string
-	config    *ConfigManager
-	mu        sync.RWMutex
-	state     persistedState
+	path       string
+	legacyPath string
+	usagePath  string
+	db         *sql.DB
+	config     *ConfigManager
+	mu         sync.RWMutex
+	state      persistedState
 }
 
 func NewStore(path string, config *ConfigManager) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		path = defaultDataPath
-	}
-	store := &Store{path: path, usagePath: path + ".usage.ndjson", config: config}
-	store.state = persistedState{Version: stateVersion, ModelSettings: map[string]ModelSetting{}}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		if err := store.saveLocked(); err != nil {
-			return nil, err
-		}
-		return store, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read data store: %w", err)
-	}
-	if err := json.Unmarshal(data, &store.state); err != nil {
-		return nil, fmt.Errorf("decode data store: %w", err)
-	}
-	if store.state.Version != stateVersion {
-		return nil, fmt.Errorf("unsupported data store version %d", store.state.Version)
-	}
-	if store.state.ModelSettings == nil {
-		store.state.ModelSettings = map[string]ModelSetting{}
-	}
-	if err := store.loadUsage(); err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
-func (s *Store) loadUsage() error {
-	file, err := os.Open(s.usagePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("open usage log: %w", err)
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	// Audit entries can contain the full proxied request and response bodies.
-	scanner.Buffer(make([]byte, 64<<10), 128<<20)
-	for scanner.Scan() {
-		var record UsageRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			return fmt.Errorf("decode usage log: %w", err)
-		}
-		s.state.Usage = append(s.state.Usage, record)
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read usage log: %w", err)
-	}
-	const maxUsageRecords = 50000
-	if len(s.state.Usage) > maxUsageRecords {
-		s.state.Usage = append([]UsageRecord(nil), s.state.Usage[len(s.state.Usage)-maxUsageRecords:]...)
-	}
-	return nil
-}
-
-func (s *Store) appendUsageLocked(record UsageRecord) error {
-	if err := os.MkdirAll(filepath.Dir(s.usagePath), 0o700); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(s.usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	encoder := json.NewEncoder(file)
-	err = encoder.Encode(record)
-	if syncErr := file.Sync(); err == nil {
-		err = syncErr
-	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	return err
-}
-
-func (s *Store) compactUsageLocked() error {
-	directory := filepath.Dir(s.usagePath)
-	temporary, err := os.CreateTemp(directory, ".atom2api-usage-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		return err
-	}
-	encoder := json.NewEncoder(temporary)
-	for _, record := range s.state.Usage {
-		if err := encoder.Encode(record); err != nil {
-			temporary.Close()
-			return err
-		}
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return replaceFile(temporaryPath, s.usagePath)
-}
-
-func (s *Store) saveLocked() error {
-	data, err := json.MarshalIndent(s.state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode data store: %w", err)
-	}
-	data = append(data, '\n')
-	directory := filepath.Dir(s.path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create data directory: %w", err)
-	}
-	temporary, err := os.CreateTemp(directory, ".atom2api-data-*")
-	if err != nil {
-		return fmt.Errorf("create temporary data store: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return replaceFile(temporaryPath, s.path)
+	return newSQLiteStore(path, config)
 }
 
 func (s *Store) encrypt(plaintext string) (string, error) {
@@ -814,16 +676,11 @@ func (s *Store) RecordUsage(record UsageRecord) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.appendUsageLocked(record); err != nil {
-		return fmt.Errorf("append usage log: %w", err)
-	}
 	s.state.Usage = append(s.state.Usage, record)
-	const maxUsageRecords = 50000
+	compact := false
 	if len(s.state.Usage) > maxUsageRecords {
 		s.state.Usage = append([]UsageRecord(nil), s.state.Usage[len(s.state.Usage)-maxUsageRecords:]...)
-		if err := s.compactUsageLocked(); err != nil {
-			return fmt.Errorf("compact usage log: %w", err)
-		}
+		compact = true
 	}
 	for i := range s.state.Accounts {
 		if s.state.Accounts[i].ID == record.AccountID {
@@ -854,7 +711,7 @@ func (s *Store) RecordUsage(record UsageRecord) error {
 			break
 		}
 	}
-	return s.saveLocked()
+	return s.saveUsageLocked(record, compact)
 }
 
 func incrementRateLimitWindows(account *Account) {

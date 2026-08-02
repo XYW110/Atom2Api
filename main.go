@@ -51,6 +51,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer store.Close()
 	codingPlan := NewCodingPlanClient(config, store)
 	oauth := NewOAuthManager(config, store, codingPlan)
 	codingPlan.SetOAuthManager(oauth)

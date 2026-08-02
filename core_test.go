@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -26,7 +25,34 @@ func newTestStore(t *testing.T) (*ConfigManager, *Store) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 	return config, store
+}
+
+func storedUsageData(t *testing.T, store *Store) []byte {
+	t.Helper()
+	rows, err := store.db.Query(`SELECT data FROM atom2api_usage_records ORDER BY seq`)
+	if err != nil {
+		t.Fatalf("query stored usage: %v", err)
+	}
+	defer rows.Close()
+	var result []byte
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			t.Fatalf("scan stored usage: %v", err)
+		}
+		result = append(result, data...)
+		result = append(result, '\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read stored usage: %v", err)
+	}
+	return result
 }
 
 func addTestAccount(t *testing.T, store *Store, upstreamURL string) AccountView {
@@ -214,9 +240,9 @@ func TestProxyNonStreamingRewritesModelAndRecordsUsage(t *testing.T) {
 	if records[0].Method != http.MethodPost || records[0].RequestBody != "" || records[0].ResponseBody != "" || len(records[0].RequestHeaders) != 0 || len(records[0].ResponseHeaders) != 0 {
 		t.Fatalf("audit debug details were recorded while disabled: %#v", records[0])
 	}
-	data, err := os.ReadFile(store.usagePath)
-	if err != nil || !bytes.Contains(data, []byte(`"input_tokens":11`)) {
-		t.Fatalf("usage log = %s, %v", data, err)
+	data := storedUsageData(t, store)
+	if !bytes.Contains(data, []byte(`"input_tokens":11`)) {
+		t.Fatalf("stored usage = %s", data)
 	}
 }
 
@@ -262,13 +288,8 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 	if records[0].Method != http.MethodPost || records[0].RequestBody != "" || records[0].ResponseBody != "" {
 		t.Fatalf("stream audit debug details were recorded while disabled: %#v", records[0])
 	}
-	file, err := os.Open(store.usagePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	if !bufio.NewScanner(file).Scan() {
-		t.Fatal("usage log is empty")
+	if len(storedUsageData(t, store)) == 0 {
+		t.Fatal("stored usage is empty")
 	}
 }
 

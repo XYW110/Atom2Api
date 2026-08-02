@@ -32,6 +32,31 @@ func TestConfigManagerCreatesDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestConfigManagerUpgradesLegacyJSONDataPath(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"user_agent":"legacy-client","data_path":"data/custom-state.json"}`), 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	manager, err := NewConfigManager(configPath)
+	if err != nil {
+		t.Fatalf("NewConfigManager: %v", err)
+	}
+	if got := manager.Snapshot().DataPath; got != "data/custom-state.db" {
+		t.Fatalf("upgraded data path = %q", got)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read upgraded config: %v", err)
+	}
+	var stored Config
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatalf("decode upgraded config: %v", err)
+	}
+	if stored.DataPath != "data/custom-state.db" {
+		t.Fatalf("stored data path = %q", stored.DataPath)
+	}
+}
+
 func TestConfigManagerReloadsValidChanges(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	manager, err := NewConfigManager(configPath)

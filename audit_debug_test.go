@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
@@ -67,10 +66,7 @@ func TestProxyAuditDebugRecordsBodiesAndSanitizedHeaders(t *testing.T) {
 	if got := record.ResponseHeaders["Set-Cookie"]; len(got) != 1 || got[0] != "[REDACTED]" {
 		t.Fatalf("response Set-Cookie = %#v", got)
 	}
-	data, err := os.ReadFile(store.usagePath)
-	if err != nil {
-		t.Fatalf("read usage log: %v", err)
-	}
+	data := storedUsageData(t, store)
 	for _, secretValue := range [][]byte{[]byte("oauth-access-secret"), []byte("upstream-session=secret"), []byte(secret)} {
 		if bytes.Contains(data, secretValue) {
 			t.Fatalf("usage log contains secret %q", secretValue)
@@ -125,10 +121,7 @@ func TestProxyAuditForcesUpstreamErrorResponseWhenDebugDisabled(t *testing.T) {
 	if got := record.ResponseHeaders["Set-Cookie"]; len(got) != 1 || got[0] != "[REDACTED]" {
 		t.Fatalf("response Set-Cookie = %#v", got)
 	}
-	data, err := os.ReadFile(store.usagePath)
-	if err != nil {
-		t.Fatalf("read usage log: %v", err)
-	}
+	data := storedUsageData(t, store)
 	if bytes.Contains(data, []byte("error-session=secret")) {
 		t.Fatal("usage log contains upstream Set-Cookie value")
 	}

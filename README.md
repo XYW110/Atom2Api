@@ -12,7 +12,7 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 - **Plain HTTP by default**: Atom2Api does not provide TLS. Prompts, source code, responses, and API keys may be transmitted in plain text between clients and the service. The default listen address, `:8080`, may also expose the service to other devices on the same network. For anything beyond local-only use, you must configure an HTTPS reverse proxy, a firewall, and strict access controls.
 - **Insecure default administrator password**: The initial administrator password is `atom2api`. Although the OpenAI-compatible API requires a generated API key, anyone who can reach the service and knows the default password may access the management console. Change the password immediately after the first login and protect all issued API keys.
 - **Sensitive local data**: OAuth tokens are encrypted at rest with AES-256-GCM, and only SHA-256 digests of API keys are stored. However, `config.json` stores the administrator password, `encryption_key`, and optional `signer_token` in plain text. Any process or user with access to both `config.json` and `data/` can decrypt the OAuth credentials. Restrict access to these files and back them up together securely.
-- **Audit logs contain request content**: `<data_path>.usage.ndjson` records request and response bodies in plain text. These records may contain prompts, source code, personal data, or other secrets. Restrict log access, limit backup scope, and clean up records according to your data-retention requirements.
+- **Audit logs may contain request content**: The SQLite database records request and response bodies when audit debug mode is enabled, and always records upstream error responses. These records may contain prompts, source code, personal data, or other secrets. Restrict database access, limit backup scope, and clean up records according to your data-retention requirements.
 - **Unofficial compatibility implementation**: This project accesses the AtomGit upstream through an independently documented, community-maintained signing implementation. It is not an official AtomGit/AtomCode client or supported integration. Upstream protocol changes may break the service at any time, and usage may result in account restrictions or bans.
 
 **Disclaimer**: This project is for learning and research only. It is not affiliated with or endorsed by AtomGit/AtomCode. You are responsible for evaluating the risks, complying with the AtomGit/AtomCode terms of service and applicable law, and accepting responsibility for account bans, data exposure, charges, or other losses.
@@ -140,7 +140,7 @@ curl http://localhost:8080/v1/chat/completions \
 | Field | Default | Description |
 |---|---|---|
 | `listen_address` | `:8080` | HTTP listen address; the `PORT` environment variable takes precedence |
-| `data_path` | `data/atom2api.json` | Account state, API key digests, and counters |
+| `data_path` | `data/atom2api.db` | SQLite database containing accounts, API key digests, settings, counters, and audit records |
 | `admin_password` | `atom2api` | Management console password |
 | `encryption_key` | Randomly generated on first launch | OAuth token encryption key; do not change or disclose it |
 | `platform_base_url` | `https://acs.atomgit.com` | OAuth broker |
@@ -150,7 +150,7 @@ curl http://localhost:8080/v1/chat/completions \
 | `audit_debug_enabled` | `false` | Records full request/response bodies and sanitized headers when enabled |
 | `request_timeout_seconds` | `120` | Upstream request timeout, from 5 to 600 seconds |
 
-Primary state is written to `data_path`. Request records are appended to `<data_path>.usage.ndjson`, and both memory and the log retain at most the latest 50,000 requests for dashboard aggregation. By default only request metadata and usage are retained. Full bodies and headers are stored only when audit debug mode is enabled. Upstream responses with a non-200 status are retained regardless of that setting. Authentication, cookie, token, API key, and signature header values are redacted.
+All runtime state is stored in the SQLite database at `data_path`, including accounts, API keys, model settings, plan claim logs, and the latest 50,000 request records used for dashboard aggregation. On startup, an existing legacy JSON state file and its `<data_path>.usage.ndjson` log are migrated transactionally into the database and removed only after the migration commits. By default only request metadata and usage are retained. Full bodies and headers are stored only when audit debug mode is enabled. Upstream responses with a non-200 status are retained regardless of that setting. Authentication, cookie, token, API key, and signature header values are redacted.
 
 ## Signing Compatibility
 
