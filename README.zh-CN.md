@@ -79,7 +79,9 @@ docker compose up -d
 
 ## 版本发布
 
-推送 `v1.2.0` 形式的语义化版本标签后，GitHub Actions 会自动执行测试、构建前端并发布 GitHub Release。Release 包含 Linux、Windows、macOS 的 amd64/arm64 压缩包以及 `SHA256SUMS` 校验文件。
+推送 `v1.2.0` 形式的语义化版本标签后，GitHub Actions 会自动执行测试、构建前端、发布 GitHub Release，并将 `linux/amd64` 和 `linux/arm64` 多架构镜像推送至 [`cnluminous/atom2api`](https://hub.docker.com/r/cnluminous/atom2api)。稳定版本会同时发布版本号标签（例如 `1.2.0`）和 `latest`；预发布版本只发布对应版本号标签，不会覆盖 `latest`。GitHub Release 包含 Linux、Windows、macOS 的 amd64/arm64 压缩包以及 `SHA256SUMS` 校验文件。
+
+首次发布 Docker 镜像前，需要在 GitHub 仓库的 **Settings > Secrets and variables > Actions** 中添加 `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`。请使用具有读写权限的 Docker Hub Access Token，不要使用账号密码。
 
 在已与上游同步且工作树干净的分支中，使用 PowerShell 7 运行发布脚本：
 

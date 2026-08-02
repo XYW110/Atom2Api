@@ -79,7 +79,9 @@ Open `http://localhost:8080` after the container starts. Data is stored in the `
 
 ## Releases
 
-Pushing a semantic-version tag such as `v1.2.0` triggers GitHub Actions to test the project, build the frontend, and publish a GitHub Release. The release contains Linux, Windows, and macOS packages for amd64 and arm64, together with `SHA256SUMS`.
+Pushing a semantic-version tag such as `v1.2.0` triggers GitHub Actions to test the project, build the frontend, publish a GitHub Release, and push a multi-platform `linux/amd64` and `linux/arm64` image to [`cnluminous/atom2api`](https://hub.docker.com/r/cnluminous/atom2api). Stable releases publish both the version tag (for example, `1.2.0`) and `latest`; prereleases publish only their version tag and do not replace `latest`. The GitHub Release contains Linux, Windows, and macOS packages for amd64 and arm64, together with `SHA256SUMS`.
+
+Before the first Docker publication, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` under **Settings > Secrets and variables > Actions** in the GitHub repository. Use a Docker Hub access token with read and write permissions instead of an account password.
 
 From a clean branch that is synchronized with its upstream, run the release helper with PowerShell 7:
 
