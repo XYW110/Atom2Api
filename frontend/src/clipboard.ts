@@ -26,25 +26,47 @@ function copyTextWithLegacyAPI(text: string) {
   textarea.select();
   textarea.setSelectionRange(0, text.length);
 
+  let copyEventHandled = false;
+  const handleCopy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return;
+    try {
+      event.clipboardData.setData('text/plain', text);
+      event.preventDefault();
+      copyEventHandled = true;
+    } catch {
+      // The command result below remains unsuccessful when clipboard data cannot be set.
+    }
+  };
+  document.addEventListener('copy', handleCopy);
+
   try {
-    if (!document.execCommand('copy')) {
+    if (!document.execCommand('copy') || !copyEventHandled) {
       throw new Error('浏览器拒绝访问剪贴板，请手动选择并复制');
     }
   } finally {
+    document.removeEventListener('copy', handleCopy);
     textarea.remove();
     if (activeElement?.isConnected) activeElement.focus();
   }
 }
 
 export async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Clipboard API may be blocked even in a secure context; try the legacy API below.
-    }
+  let legacyError: unknown;
+  try {
+    copyTextWithLegacyAPI(text);
+    return;
+  } catch (error) {
+    legacyError = error;
+    // The synchronous path preserves the button click's user activation. Use the modern API if it is unavailable.
   }
 
-  copyTextWithLegacyAPI(text);
+  if (!navigator.clipboard?.writeText) {
+    if (legacyError instanceof Error) throw legacyError;
+    throw new Error('当前浏览器不支持自动复制，请手动选择并复制');
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    throw new Error('浏览器拒绝访问剪贴板，请手动选择并复制');
+  }
 }
