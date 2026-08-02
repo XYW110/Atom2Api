@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
+import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 import { apiFetch, type Account, type PlanClaimLog, type PlanClaimResult, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
@@ -229,7 +230,7 @@ export default function AccountsPage() {
   const copyOAuthURL = async () => {
     if (!oauth?.login_url) return;
     try {
-      await navigator.clipboard.writeText(oauth.login_url);
+      await copyText(oauth.login_url);
       setOAuthCopied(true);
       showToast('success', '复制成功', 'OAuth 链接已复制到剪贴板');
     } catch (copyError) {

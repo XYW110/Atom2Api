@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertCircle, Check, Copy, KeyRound, Pencil, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
 import { Button, Checkbox, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
+import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 import { apiFetch, type APIKeyRecord, type ModelRecord, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
@@ -157,7 +158,7 @@ export default function KeysPage() {
 
   const copySecret = async () => {
     try {
-      await navigator.clipboard.writeText(secret);
+      await copyText(secret);
       setCopied(true);
       showToast('success', '复制成功', 'API 密钥已复制到剪贴板');
     } catch (copyError) {

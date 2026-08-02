@@ -31,6 +31,7 @@ import {
   Tooltip,
 } from '@heroui/react';
 import { apiFetch, type AuditListResponse, type AuditRecordDetail, type AuditRecordSummary, errorMessage, formatTokens } from '../api';
+import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 
@@ -90,7 +91,7 @@ function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: 
   const copy = async () => {
     if (!body) return;
     try {
-      await navigator.clipboard.writeText(body);
+      await copyText(body);
       setCopied(true);
       showToast('success', '复制成功', `${copyLabel.replace('复制', '')}已复制到剪贴板`);
       window.setTimeout(() => setCopied(false), 1600);
