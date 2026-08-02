@@ -11,6 +11,15 @@ const emptyDashboard: DashboardResponse = {
   trend: [], model_distribution: [], recent_requests: [],
 };
 
+function trendLabel(start: string, range: string) {
+  const date = new Date(start);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (value: number) => value.toString().padStart(2, '0');
+  return range === '24h'
+    ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    : `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export default function DashboardPage() {
   const [range, setRange] = useState('24h');
   const [data, setData] = useState<DashboardResponse>(emptyDashboard);
@@ -85,7 +94,7 @@ export default function DashboardPage() {
                     <div className="w-full bg-blue-500" style={{ height: `${Math.max((point.requests / maxRequests) * 100, point.requests ? 5 : 0)}%` }} />
                     <div className="absolute bottom-0 left-0 w-full bg-red-400" style={{ height: `${point.requests ? (point.errors / maxRequests) * 100 : 0}%` }} />
                   </div>
-                  <span className="pb-2 text-[10px] text-zinc-400">{point.label}</span>
+                  <span className="pb-2 text-[10px] text-zinc-400">{trendLabel(point.start, range)}</span>
                 </div>
               ))}
             </div>
