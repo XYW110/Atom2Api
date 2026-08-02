@@ -11,7 +11,7 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 
 - **默认使用明文 HTTP**：Atom2Api 本身不提供 TLS。客户端与服务之间的提示词、代码、响应和 API Key 均可能以明文传输；默认监听地址 `:8080` 还可能使服务暴露给同一网络中的其他设备。非纯本机使用时，必须配置 HTTPS 反向代理、防火墙和严格的访问范围。
 - **默认管理密码不安全**：首次启动的管理密码为 `atom2api`。OpenAI 兼容接口虽要求使用已创建的 API Key，但任何能访问服务且知道默认密码的人都可能进入管理控制台。首次登录后必须立即修改密码，并妥善保管已签发的 API Key。
-- **本地数据包含敏感信息**：OAuth token 使用 AES-256-GCM 加密保存，API Key 仅保存 SHA-256 摘要；但 `config.json` 仍以明文保存管理密码、`encryption_key` 及可选的 `signer_token`。同时取得 `config.json` 和 `data/` 的进程或用户可以解密 OAuth 凭据，请严格限制这些文件的读取权限并一同安全备份。
+- **本地数据包含敏感信息**：OAuth token 使用 AES-256-GCM 加密保存，API Key 仅保存 SHA-256 摘要，管理密码仅保存 bcrypt 哈希；但 `config.json` 仍包含 `encryption_key` 及可选的 `signer_token`。同时取得 `config.json` 和 `data/` 的进程或用户可以解密 OAuth 凭据，请严格限制这些文件的读取权限并一同安全备份。
 - **审计日志可能保存请求内容**：开启审计调试后，SQLite 数据库会记录请求与响应正文；上游错误响应则始终记录。其中可能包含提示词、源代码、个人信息或其它秘密，请限制数据库访问、控制备份范围，并按数据保留要求及时清理。
 - **依赖非官方兼容实现**：本项目通过社区独立记录的签名兼容实现访问 AtomGit 上游，不属于 AtomGit/AtomCode 官方客户端或受支持集成。上游协议变更可能随时导致服务不可用，使用方式也可能带来账号限制或封禁风险。
 
@@ -27,7 +27,7 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 - 流式代理：SSE 即时转发，自动请求 `include_usage`，记录输入、输出、缓存和推理 tokens
 - 多账号路由：跳过停用或额度耗尽账号，在可用账号之间轮询
 - API Key：仅保存 SHA-256 摘要，支持模型白名单、撤销、恢复和过期时间
-- 管理安全：HttpOnly + SameSite 会话、登录限速、OAuth token AES-256-GCM 加密落盘
+- 管理安全：bcrypt 密码哈希、HttpOnly + SameSite 会话、登录限速、OAuth token AES-256-GCM 加密落盘
 - 仪表盘：请求趋势、请求数、输入/输出 tokens、成功率、延迟、模型分布和最近请求
 - 单二进制部署：React 控制台嵌入 Go 服务，另附 Docker/Compose
 
@@ -50,7 +50,7 @@ go test ./...
 go run .
 ```
 
-打开 `http://localhost:8080`。首次运行会生成 `config.json` 和随机 `encryption_key`。默认管理密码是 `atom2api`，登录后应立即在“系统设置”中修改。
+打开 `http://localhost:8080`。首次运行会生成 `config.json`、随机 `encryption_key` 和默认管理密码 `atom2api` 的 bcrypt 哈希，登录后应立即在“系统设置”中修改。通过设置页或配置热加载写入的明文密码会自动替换为 bcrypt 哈希。
 
 也可以先使用示例配置：
 
@@ -141,7 +141,7 @@ curl http://localhost:8080/v1/chat/completions \
 |---|---|---|
 | `listen_address` | `:8080` | HTTP 监听地址；`PORT` 环境变量优先 |
 | `data_path` | `data/atom2api.db` | 保存账号、密钥摘要、设置、计数和审计记录的 SQLite 数据库 |
-| `admin_password` | `atom2api` | 控制台管理密码 |
+| `admin_password` | `atom2api` 的 bcrypt 哈希 | 控制台管理密码；明文值会自动哈希并回写 |
 | `encryption_key` | 首次启动随机生成 | OAuth token 加密密钥，不应更换或泄露 |
 | `platform_base_url` | `https://acs.atomgit.com` | OAuth broker |
 | `codingplan_api_url` | `https://api.gitcode.com/api/v5` | Coding Plan REST API |

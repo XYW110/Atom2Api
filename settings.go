@@ -118,7 +118,7 @@ func writeSettingsResponse(w http.ResponseWriter, status int, snapshot ConfigSna
 		GatewayURL: snapshot.GatewayURL, SignerURL: snapshot.SignerURL,
 		SignerConfigured: true, AuditDebugEnabled: snapshot.AuditDebugEnabled,
 		RequestTimeoutSecs: snapshot.RequestTimeoutSecs,
-		DefaultPassword:    snapshot.AdminPassword == defaultAdminPassword, LoadedAt: snapshot.LoadedAt,
+		DefaultPassword:    defaultAdminPasswordActive(snapshot.AdminPassword), LoadedAt: snapshot.LoadedAt,
 	})
 }
 

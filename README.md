@@ -11,7 +11,7 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 
 - **Plain HTTP by default**: Atom2Api does not provide TLS. Prompts, source code, responses, and API keys may be transmitted in plain text between clients and the service. The default listen address, `:8080`, may also expose the service to other devices on the same network. For anything beyond local-only use, you must configure an HTTPS reverse proxy, a firewall, and strict access controls.
 - **Insecure default administrator password**: The initial administrator password is `atom2api`. Although the OpenAI-compatible API requires a generated API key, anyone who can reach the service and knows the default password may access the management console. Change the password immediately after the first login and protect all issued API keys.
-- **Sensitive local data**: OAuth tokens are encrypted at rest with AES-256-GCM, and only SHA-256 digests of API keys are stored. However, `config.json` stores the administrator password, `encryption_key`, and optional `signer_token` in plain text. Any process or user with access to both `config.json` and `data/` can decrypt the OAuth credentials. Restrict access to these files and back them up together securely.
+- **Sensitive local data**: OAuth tokens are encrypted at rest with AES-256-GCM, API keys are stored as SHA-256 digests, and the administrator password is stored as a bcrypt hash. However, `config.json` still contains the `encryption_key` and optional `signer_token`. Any process or user with access to both `config.json` and `data/` can decrypt the OAuth credentials. Restrict access to these files and back them up together securely.
 - **Audit logs may contain request content**: The SQLite database records request and response bodies when audit debug mode is enabled, and always records upstream error responses. These records may contain prompts, source code, personal data, or other secrets. Restrict database access, limit backup scope, and clean up records according to your data-retention requirements.
 - **Unofficial compatibility implementation**: This project accesses the AtomGit upstream through an independently documented, community-maintained signing implementation. It is not an official AtomGit/AtomCode client or supported integration. Upstream protocol changes may break the service at any time, and usage may result in account restrictions or bans.
 
@@ -27,7 +27,7 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 - Streaming proxy: forwards SSE in real time, automatically requests `include_usage`, and records input, output, cached, and reasoning tokens
 - Multi-account routing: skips disabled or quota-exhausted accounts and distributes requests across available accounts in round-robin order
 - API keys: stores SHA-256 digests only and supports model allowlists, revocation, restoration, and expiration
-- Management security: HttpOnly and SameSite sessions, login rate limiting, and AES-256-GCM encryption for stored OAuth tokens
+- Management security: bcrypt password hashing, HttpOnly and SameSite sessions, login rate limiting, and AES-256-GCM encryption for stored OAuth tokens
 - Dashboard: request trends, request counts, input/output tokens, success rate, latency, model distribution, and recent requests
 - Single-binary deployment: embeds the React console in the Go service and also provides Docker and Compose configurations
 
@@ -50,7 +50,7 @@ go test ./...
 go run .
 ```
 
-Open `http://localhost:8080`. On first launch, Atom2Api creates `config.json` with a random `encryption_key`. The default administrator password is `atom2api`; change it immediately under **System Settings** after logging in.
+Open `http://localhost:8080`. On first launch, Atom2Api creates `config.json` with a random `encryption_key` and a bcrypt hash of the default administrator password `atom2api`; change the password immediately under **System Settings** after logging in. Plaintext passwords entered through settings or a configuration reload are automatically replaced with bcrypt hashes.
 
 You can also start with the example configuration:
 
@@ -141,7 +141,7 @@ curl http://localhost:8080/v1/chat/completions \
 |---|---|---|
 | `listen_address` | `:8080` | HTTP listen address; the `PORT` environment variable takes precedence |
 | `data_path` | `data/atom2api.db` | SQLite database containing accounts, API key digests, settings, counters, and audit records |
-| `admin_password` | `atom2api` | Management console password |
+| `admin_password` | bcrypt hash of `atom2api` | Management console password; plaintext values are automatically hashed and rewritten |
 | `encryption_key` | Randomly generated on first launch | OAuth token encryption key; do not change or disclose it |
 | `platform_base_url` | `https://acs.atomgit.com` | OAuth broker |
 | `codingplan_api_url` | `https://api.gitcode.com/api/v5` | Coding Plan REST API |

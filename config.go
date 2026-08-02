@@ -110,7 +110,7 @@ func defaultConfig() (Config, error) {
 	if _, err := rand.Read(key); err != nil {
 		return Config{}, fmt.Errorf("generate encryption key: %w", err)
 	}
-	return Config{
+	config := Config{
 		UserAgent:          defaultUserAgent,
 		ListenAddress:      defaultListenAddress,
 		DataPath:           defaultDataPath,
@@ -120,7 +120,11 @@ func defaultConfig() (Config, error) {
 		CodingPlanAPIURL:   defaultCodingPlanAPIURL,
 		GatewayURL:         defaultGatewayURL,
 		RequestTimeoutSecs: 120,
-	}, nil
+	}
+	if _, err := normalizeConfig(&config); err != nil {
+		return Config{}, err
+	}
+	return config, nil
 }
 
 func normalizeConfig(config *Config) (bool, error) {
@@ -142,6 +146,12 @@ func normalizeConfig(config *Config) (bool, error) {
 	setString(&config.PlatformBaseURL, defaultPlatformBaseURL)
 	setString(&config.CodingPlanAPIURL, defaultCodingPlanAPIURL)
 	setString(&config.GatewayURL, defaultGatewayURL)
+	normalizedPassword, passwordChanged, err := normalizeAdminPassword(config.AdminPassword)
+	if err != nil {
+		return false, err
+	}
+	config.AdminPassword = normalizedPassword
+	changed = changed || passwordChanged
 	if config.RequestTimeoutSecs == 0 {
 		config.RequestTimeoutSecs = 120
 		changed = true
@@ -333,8 +343,8 @@ func validateConfig(config Config) error {
 			return errors.New("user_agent contains a control character")
 		}
 	}
-	if strings.TrimSpace(config.AdminPassword) == "" {
-		return errors.New("admin_password must not be empty")
+	if !adminPasswordIsHash(config.AdminPassword) {
+		return errors.New("admin_password must be a bcrypt hash")
 	}
 	if config.RequestTimeoutSecs < 5 || config.RequestTimeoutSecs > 600 {
 		return errors.New("request_timeout_seconds must be between 5 and 600")

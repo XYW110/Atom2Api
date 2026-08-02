@@ -116,7 +116,7 @@ func main() {
 		IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
 
-	if snapshot.AdminPassword == defaultAdminPassword {
+	if defaultAdminPasswordActive(snapshot.AdminPassword) {
 		log.Printf("WARNING: default admin password is active; change it in Settings before exposing this service")
 	}
 	if snapshot.SignerURL == "" {

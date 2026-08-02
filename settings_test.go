@@ -22,7 +22,7 @@ func TestSettingsHandlers(t *testing.T) {
 		t.Fatalf("GET status = %d", getResponse.Code)
 	}
 
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"user_agent":"api-client/3.0","audit_debug_enabled":true}`))
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"user_agent":"api-client/3.0","admin_password":"updated-secret","audit_debug_enabled":true}`))
 	updateRequest.Header.Set("Content-Type", "application/json")
 	updateResponse := httptest.NewRecorder()
 	handleUpdateSettings(manager).ServeHTTP(updateResponse, updateRequest)
@@ -42,6 +42,9 @@ func TestSettingsHandlers(t *testing.T) {
 	}
 	if !manager.Snapshot().AuditDebugEnabled {
 		t.Fatal("runtime AuditDebugEnabled = false")
+	}
+	if password := manager.Snapshot().AdminPassword; password == "updated-secret" || !adminPasswordMatches(password, "updated-secret") {
+		t.Fatal("runtime admin password is not stored as a matching bcrypt hash")
 	}
 }
 

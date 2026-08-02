@@ -2,8 +2,6 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"net"
@@ -51,9 +49,7 @@ func (a *AdminAuth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return
 	}
-	want := sha256.Sum256([]byte(a.config.Snapshot().AdminPassword))
-	got := sha256.Sum256([]byte(request.Password))
-	if subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
+	if !adminPasswordMatches(a.config.Snapshot().AdminPassword, request.Password) {
 		a.recordFailure(ip)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid password"})
 		return

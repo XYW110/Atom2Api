@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestConfigManagerCreatesDefaultConfig(t *testing.T) {
@@ -29,6 +31,12 @@ func TestConfigManagerCreatesDefaultConfig(t *testing.T) {
 	}
 	if config.UserAgent != defaultUserAgent {
 		t.Fatalf("generated UserAgent = %q, want %q", config.UserAgent, defaultUserAgent)
+	}
+	if config.AdminPassword == defaultAdminPassword {
+		t.Fatal("generated config stores the default admin password in plaintext")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(config.AdminPassword), []byte(defaultAdminPassword)); err != nil {
+		t.Fatalf("generated admin password is not a matching bcrypt hash: %v", err)
 	}
 }
 
@@ -76,6 +84,50 @@ func TestConfigManagerReloadsValidChanges(t *testing.T) {
 	}
 	if got := manager.Snapshot().UserAgent; got != "custom-client/1.2.3" {
 		t.Fatalf("reloaded UserAgent = %q", got)
+	}
+}
+
+func TestConfigManagerReloadHashesChangedAdminPassword(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	manager, err := NewConfigManager(configPath)
+	if err != nil {
+		t.Fatalf("NewConfigManager() error = %v", err)
+	}
+
+	config := manager.Snapshot().Config
+	config.AdminPassword = "reloaded-secret"
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("encode config: %v", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	changed, err := manager.Reload()
+	if err != nil {
+		t.Fatalf("Reload() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("Reload() changed = false, want true")
+	}
+	if !adminPasswordMatches(manager.Snapshot().AdminPassword, "reloaded-secret") {
+		t.Fatal("runtime admin password does not match the reloaded password")
+	}
+
+	storedData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read normalized config: %v", err)
+	}
+	var stored Config
+	if err := json.Unmarshal(storedData, &stored); err != nil {
+		t.Fatalf("decode normalized config: %v", err)
+	}
+	if stored.AdminPassword == "reloaded-secret" {
+		t.Fatal("reloaded admin password remains in plaintext")
+	}
+	if !adminPasswordMatches(stored.AdminPassword, "reloaded-secret") {
+		t.Fatal("stored admin password is not a matching bcrypt hash")
 	}
 }
 
