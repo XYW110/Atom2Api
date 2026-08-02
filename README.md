@@ -68,11 +68,14 @@ go run .
 
 ## Docker
 
+The Compose configuration uses the published [`cnluminous/atom2api:1.0.2`](https://hub.docker.com/r/cnluminous/atom2api) image from Docker Hub, so no local image build is required.
+
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-Data is stored in the `atom2api-data` volume. After the first launch, open the console and change the default password.
+Open `http://localhost:8080` after the container starts. Data is stored in the `atom2api-data` volume. After the first launch, open the console and change the default password.
 
 ## Releases
 

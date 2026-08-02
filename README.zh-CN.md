@@ -68,11 +68,14 @@ go run .
 
 ## Docker
 
+Compose 配置使用 Docker Hub 发布的 [`cnluminous/atom2api:1.0.2`](https://hub.docker.com/r/cnluminous/atom2api) 镜像，无需在本地构建镜像。
+
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-数据保存在 `atom2api-data` volume。首次启动后访问控制台修改默认密码。
+容器启动后访问 `http://localhost:8080`。数据保存在 `atom2api-data` volume。首次启动后访问控制台修改默认密码。
 
 ## 版本发布
 
