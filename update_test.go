@@ -65,6 +65,9 @@ func TestReleaseCheckerReturnsLatestReleaseAndCaches(t *testing.T) {
 	if info.CurrentVersion != "1.0.2" || info.LatestVersion != "1.1.0" || !info.UpdateAvailable {
 		t.Fatalf("version info = %#v", info)
 	}
+	if info.RepositoryURL != githubRepositoryURL {
+		t.Fatalf("repository URL = %q, want %q", info.RepositoryURL, githubRepositoryURL)
+	}
 	if info.ReleaseNotes != "## Changes\n\n- Added update checks" || info.CheckedAt != "2026-08-03T02:03:04Z" {
 		t.Fatalf("release details = %#v", info)
 	}
@@ -72,6 +75,15 @@ func TestReleaseCheckerReturnsLatestReleaseAndCaches(t *testing.T) {
 	_ = checker.Check(context.Background())
 	if requests != 1 {
 		t.Fatalf("GitHub requests = %d, want 1", requests)
+	}
+
+	response = httptest.NewRecorder()
+	checker.HandleVersion(response, httptest.NewRequest(http.MethodGet, "/api/version?refresh=1", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if requests != 2 {
+		t.Fatalf("GitHub requests after refresh = %d, want 2", requests)
 	}
 }
 
@@ -83,7 +95,7 @@ func TestReleaseCheckerReportsFailureWithoutHidingCurrentVersion(t *testing.T) {
 
 	checker := newReleaseChecker("1.0.2", server.URL, server.Client())
 	info := checker.Check(context.Background())
-	if info.CurrentVersion != "1.0.2" || info.CheckError == "" {
+	if info.CurrentVersion != "1.0.2" || info.RepositoryURL != githubRepositoryURL || info.CheckError == "" {
 		t.Fatalf("version info = %#v", info)
 	}
 	if info.UpdateAvailable || info.LatestVersion != "" {

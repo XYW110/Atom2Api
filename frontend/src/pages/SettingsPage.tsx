@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AlertCircle, Bug, Check, KeyRound, Network, RefreshCw, Save, Settings2, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ArrowUpCircle, Bug, Check, ExternalLink, Github, KeyRound, Network, RefreshCw, Save, Settings2, ShieldAlert } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Switch, Tooltip, useDisclosure } from '@heroui/react';
 import { PageShell, StatusDot } from '../components/PageShell';
 import { useToast } from '../components/Toast';
-import { apiFetch, type SettingsResponse, type UserAgentCheckResponse, errorMessage, jsonRequest } from '../api';
+import { apiFetch, type SettingsResponse, type UserAgentCheckResponse, type VersionInfo, errorMessage, formatDateTime, jsonRequest } from '../api';
 
 type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds'>;
+type ProjectVersionInfo = VersionInfo & { repository_url: string };
 
 const emptyForm: SettingsForm = {
   user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120,
 };
+
+const defaultRepositoryURL = 'https://github.com/cnluminous/Atom2Api';
+
+function displayVersion(value?: string) {
+  if (!value) return '—';
+  return value === 'dev' || value.startsWith('v') ? value : `v${value}`;
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
@@ -21,6 +29,10 @@ export default function SettingsPage() {
   const [checkingUserAgent, setCheckingUserAgent] = useState(false);
   const [replacingUserAgent, setReplacingUserAgent] = useState(false);
   const [userAgentCandidate, setUserAgentCandidate] = useState<UserAgentCheckResponse | null>(null);
+  const [versionInfo, setVersionInfo] = useState<ProjectVersionInfo | null>(null);
+  const [versionLoading, setVersionLoading] = useState(true);
+  const [checkingVersion, setCheckingVersion] = useState(false);
+  const [versionRequestError, setVersionRequestError] = useState('');
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const userAgentConfirmation = useDisclosure();
@@ -48,6 +60,23 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch<ProjectVersionInfo>('/api/version')
+      .then((response) => {
+        if (!active) return;
+        setVersionInfo(response);
+        setVersionRequestError('');
+      })
+      .catch((requestError) => {
+        if (active) setVersionRequestError(errorMessage(requestError, '无法读取版本信息'));
+      })
+      .finally(() => {
+        if (active) setVersionLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   const update = <K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -117,6 +146,30 @@ export default function SettingsPage() {
     }
   };
 
+  const checkApplicationVersion = async () => {
+    setCheckingVersion(true);
+    setVersionRequestError('');
+    try {
+      const response = await apiFetch<ProjectVersionInfo>('/api/version?refresh=1');
+      setVersionInfo(response);
+      if (response.check_error) {
+        showToast('error', '检查更新失败', response.check_error);
+      } else if (response.update_available) {
+        showToast('success', '发现新版本', `最新稳定版本为 ${displayVersion(response.latest_version)}`);
+      } else if (response.current_version === 'dev') {
+        showToast('success', '检查完成', `当前为开发构建，最新稳定版本为 ${displayVersion(response.latest_version)}`);
+      } else {
+        showToast('success', '已是最新版本', displayVersion(response.current_version));
+      }
+    } catch (requestError) {
+      const message = errorMessage(requestError, '无法读取版本信息');
+      setVersionRequestError(message);
+      showToast('error', '检查更新失败', message);
+    } finally {
+      setCheckingVersion(false);
+    }
+  };
+
   const isDirty = Boolean(settings) && (
     form.user_agent !== settings?.user_agent || form.platform_base_url !== settings?.platform_base_url ||
     form.codingplan_api_url !== settings?.codingplan_api_url || form.gateway_url !== settings?.gateway_url ||
@@ -124,11 +177,42 @@ export default function SettingsPage() {
     form.request_timeout_seconds !== settings?.request_timeout_seconds ||
     Boolean(adminPassword) || Boolean(signerToken)
   );
+  const repositoryURL = versionInfo?.repository_url || defaultRepositoryURL;
+  const developmentBuild = versionInfo?.current_version === 'dev';
 
   return (
-    <PageShell title="系统设置" description="认证服务、Coding Plan 网关与请求参数">
+    <PageShell title="系统设置" description="服务配置、项目信息与版本更新">
       {settings?.default_password ? <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="alert"><ShieldAlert className="mt-0.5 shrink-0" size={17} /><span>当前仍使用默认管理密码，请在下方设置新密码。</span></div> : null}
       {error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{error}</div> : null}
+
+      <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+        <div className="flex flex-col gap-3 border-b border-zinc-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-white"><Github size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">项目信息</h2><p className="mt-0.5 text-xs text-zinc-500">程序版本、源代码仓库与更新状态</p></div></div>
+          <Button isDisabled={versionLoading} isLoading={checkingVersion} radius="sm" size="sm" startContent={checkingVersion ? null : <RefreshCw size={15} />} type="button" variant="bordered" onPress={() => void checkApplicationVersion()}>检查更新</Button>
+        </div>
+        {versionLoading ? (
+          <div className="grid gap-4 px-5 py-6 sm:grid-cols-3 sm:px-6">{Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}</div>
+        ) : (
+          <div>
+            <dl className="grid gap-5 px-5 py-5 sm:grid-cols-3 sm:px-6">
+              <div><dt className="text-xs text-zinc-500">当前版本</dt><dd className="mt-1 font-mono text-sm font-semibold text-zinc-900">{displayVersion(versionInfo?.current_version)}</dd></div>
+              <div><dt className="text-xs text-zinc-500">最新稳定版本</dt><dd className="mt-1 font-mono text-sm font-semibold text-zinc-900">{displayVersion(versionInfo?.latest_version)}</dd></div>
+              <div><dt className="text-xs text-zinc-500">最近检查</dt><dd className="mt-1 text-sm font-medium text-zinc-800" title={versionInfo?.checked_at}>{versionInfo?.checked_at ? formatDateTime(versionInfo.checked_at) : '尚未检查'}</dd></div>
+            </dl>
+            <dl className="border-t border-zinc-100 px-5 py-4 sm:px-6">
+              <div className="grid gap-1 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-center"><dt className="text-xs text-zinc-500">GitHub 仓库</dt><dd className="min-w-0"><a className="inline-flex max-w-full items-center gap-1.5 break-all font-mono text-xs font-medium text-blue-600 hover:text-blue-800" href={repositoryURL} rel="noreferrer" target="_blank"><span>{repositoryURL}</span><ExternalLink className="shrink-0" size={14} /></a></dd></div>
+            </dl>
+            <div className="border-t border-zinc-100 px-5 py-4 sm:px-6">
+              {versionRequestError || versionInfo?.check_error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} /><span>更新检查失败：{versionRequestError || versionInfo?.check_error}</span></div>
+                : versionInfo?.update_available ? <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between"><span className="flex items-center gap-2"><ArrowUpCircle className="shrink-0" size={16} />发现新版本 {displayVersion(versionInfo.latest_version)}</span>{versionInfo.release_url ? <Button as="a" className="text-amber-800" endContent={<ExternalLink size={14} />} href={versionInfo.release_url} radius="sm" rel="noreferrer" size="sm" target="_blank" variant="light">查看版本</Button> : null}</div>
+                  : developmentBuild ? <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-700"><AlertCircle className="mt-0.5 shrink-0" size={16} /><span>当前运行开发构建，无法与正式版本自动比较；GitHub 最新稳定版本为 {displayVersion(versionInfo?.latest_version)}。</span></div>
+                    : versionInfo?.latest_version ? <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-700"><Check className="shrink-0" size={16} />当前已是最新稳定版本</div>
+                      : <div className="flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-600"><AlertCircle className="shrink-0" size={16} />尚未获得最新版本信息</div>}
+            </div>
+            {versionInfo?.release_notes ? <div className="border-t border-zinc-100 px-5 py-5 sm:px-6"><div className="mb-2 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-zinc-900">最新版本更新日志</h3>{versionInfo.published_at ? <span className="text-xs text-zinc-400">发布于 {formatDateTime(versionInfo.published_at)}</span> : null}</div><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-zinc-50 p-4 font-mono text-xs leading-5 text-zinc-600">{versionInfo.release_notes}</pre></div> : null}
+          </div>
+        )}
+      </section>
 
       <form className="space-y-5" onSubmit={save}>
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">

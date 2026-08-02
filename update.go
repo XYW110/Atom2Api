@@ -14,6 +14,7 @@ import (
 
 const (
 	githubLatestReleaseURL = "https://api.github.com/repos/cnluminous/Atom2Api/releases/latest"
+	githubRepositoryURL    = "https://github.com/cnluminous/Atom2Api"
 	releaseCheckSuccessTTL = 30 * time.Minute
 	releaseCheckFailureTTL = 5 * time.Minute
 )
@@ -22,6 +23,7 @@ type VersionInfo struct {
 	CurrentVersion  string `json:"current_version"`
 	LatestVersion   string `json:"latest_version,omitempty"`
 	UpdateAvailable bool   `json:"update_available"`
+	RepositoryURL   string `json:"repository_url"`
 	ReleaseURL      string `json:"release_url,omitempty"`
 	ReleaseNotes    string `json:"release_notes,omitempty"`
 	PublishedAt     string `json:"published_at,omitempty"`
@@ -67,20 +69,33 @@ func newReleaseChecker(currentVersion, releaseURL string, client *http.Client) *
 }
 
 func (c *ReleaseChecker) HandleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("refresh") == "1" {
+		writeJSON(w, http.StatusOK, c.Refresh(r.Context()))
+		return
+	}
 	writeJSON(w, http.StatusOK, c.Check(r.Context()))
 }
 
 func (c *ReleaseChecker) Check(ctx context.Context) VersionInfo {
+	return c.check(ctx, false)
+}
+
+func (c *ReleaseChecker) Refresh(ctx context.Context) VersionInfo {
+	return c.check(ctx, true)
+}
+
+func (c *ReleaseChecker) check(ctx context.Context, force bool) VersionInfo {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	now := c.now().UTC()
-	if !c.expiresAt.IsZero() && now.Before(c.expiresAt) {
+	if !force && !c.expiresAt.IsZero() && now.Before(c.expiresAt) {
 		return c.cached
 	}
 
 	info := VersionInfo{
 		CurrentVersion: c.currentVersion,
+		RepositoryURL:  githubRepositoryURL,
 		CheckedAt:      now.Format(time.RFC3339),
 	}
 	release, err := c.fetchLatestRelease(ctx)
