@@ -827,16 +827,20 @@ func (s *Store) RecordUsage(record UsageRecord) error {
 	}
 	for i := range s.state.Accounts {
 		if s.state.Accounts[i].ID == record.AccountID {
-			s.state.Accounts[i].RequestCount++
-			s.state.Accounts[i].InputTokens += record.InputTokens
-			s.state.Accounts[i].OutputTokens += record.OutputTokens
-			s.state.Accounts[i].LastUsedAt = &record.Timestamp
+			account := &s.state.Accounts[i]
+			account.RequestCount++
+			account.InputTokens += record.InputTokens
+			account.OutputTokens += record.OutputTokens
+			account.LastUsedAt = &record.Timestamp
 			if record.Status >= 200 && record.Status < 400 {
-				s.state.Accounts[i].ConsecutiveErr = 0
-				s.state.Accounts[i].LastError = ""
+				account.ConsecutiveErr = 0
+				account.LastError = ""
 			} else {
-				s.state.Accounts[i].ConsecutiveErr++
-				s.state.Accounts[i].LastError = record.Error
+				account.ConsecutiveErr++
+				account.LastError = record.Error
+			}
+			if record.Status >= 200 && record.Status < 300 {
+				incrementRateLimitWindows(account)
 			}
 			break
 		}
@@ -851,6 +855,24 @@ func (s *Store) RecordUsage(record UsageRecord) error {
 		}
 	}
 	return s.saveLocked()
+}
+
+func incrementRateLimitWindows(account *Account) {
+	for i := range account.Plan.RateLimitWindows {
+		window := &account.Plan.RateLimitWindows[i]
+		if window.ShowEnable != 1 {
+			continue
+		}
+		window.CallsUsed++
+		if window.CallLimit <= 0 {
+			continue
+		}
+		window.UsagePercent = float64(window.CallsUsed) / float64(window.CallLimit) * 100
+		if window.UsagePercent > 100 {
+			window.UsagePercent = 100
+		}
+		window.QuotaExhausted = window.CallsUsed >= window.CallLimit
+	}
 }
 
 func randomID(prefix string) string {
