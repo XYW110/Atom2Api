@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
-import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip, useDisclosure } from '@heroui/react';
+import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Textarea, Tooltip, useDisclosure } from '@heroui/react';
 import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
@@ -121,6 +121,7 @@ export default function AccountsPage() {
   const [deleting, setDeleting] = useState<Account | null>(null);
   const [editing, setEditing] = useState<Account | null>(null);
   const [editName, setEditName] = useState('');
+  const [editNote, setEditNote] = useState('');
   const [editScheduleEnabled, setEditScheduleEnabled] = useState(true);
   const [editCron, setEditCron] = useState('0 10 * * *');
   const [logAccount, setLogAccount] = useState<Account | null>(null);
@@ -207,7 +208,7 @@ export default function AccountsPage() {
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return accounts.filter((account) => !normalized || account.name.toLowerCase().includes(normalized) || account.user.username.toLowerCase().includes(normalized) || account.id.includes(normalized));
+    return accounts.filter((account) => !normalized || account.name.toLowerCase().includes(normalized) || account.user.username.toLowerCase().includes(normalized) || account.id.includes(normalized) || account.note.toLowerCase().includes(normalized));
   }, [accounts, query]);
 
   const startOAuth = async () => {
@@ -255,6 +256,7 @@ export default function AccountsPage() {
   const openEdit = (account: Account) => {
     setEditing(account);
     setEditName(account.name);
+    setEditNote(account.note || '');
     setEditScheduleEnabled(account.plan_claim_schedule.enabled);
     setEditCron(account.plan_claim_schedule.cron || '0 10 * * *');
     editModal.onOpen();
@@ -276,12 +278,13 @@ export default function AccountsPage() {
     try {
       await apiFetch(`/api/accounts/${editing.id}`, jsonRequest('PATCH', {
         name,
+        note: editNote,
         plan_claim_schedule: { enabled: editScheduleEnabled, cron: cron || '0 10 * * *' },
       }));
       editModal.onClose();
       setEditing(null);
       await load();
-      showToast('success', '账号已更新', `“${name}”领取计划已保存`);
+      showToast('success', '账号已更新', `“${name}”的账号信息已保存`);
     } catch (requestError) {
       showToast('error', '保存账号失败', errorMessage(requestError, '请检查 CRON 表达式'));
     } finally {
@@ -363,7 +366,7 @@ export default function AccountsPage() {
       </section>
 
       <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-100 p-4"><Input aria-label="搜索账号" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /></div>
+        <div className="border-b border-zinc-100 p-4"><Input aria-label="搜索账号" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /></div>
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto">
             <Table aria-label="AtomGit 账号列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
@@ -374,7 +377,7 @@ export default function AccountsPage() {
                   const status = statusMeta[account.status] || statusMeta.error;
                   return (
                     <TableRow key={account.id}>
-                      <TableCell><div className="flex items-center gap-3">{account.user.avatar_url ? <img alt="" className="h-8 w-8 rounded-full bg-zinc-100 object-cover" src={account.user.avatar_url} /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">{account.name.slice(0, 2).toUpperCase()}</span>}<div><p className="font-medium text-zinc-900">{account.name}</p><p className="mt-0.5 text-xs text-zinc-400">@{account.user.username}</p></div></div></TableCell>
+                      <TableCell><div className="flex min-w-52 items-center gap-3">{account.user.avatar_url ? <img alt="" className="h-8 w-8 rounded-full bg-zinc-100 object-cover" src={account.user.avatar_url} /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">{account.name.slice(0, 2).toUpperCase()}</span>}<div className="min-w-0"><p className="font-medium text-zinc-900">{account.name}</p><p className="mt-0.5 text-xs text-zinc-400">@{account.user.username}</p>{account.note ? <p className="mt-1 max-w-64 truncate text-xs text-zinc-500" title={account.note}>{account.note}</p> : null}</div></div></TableCell>
                       <TableCell><div><p className="font-medium text-zinc-800">{account.plan.codingplan_free?.plan_name || '未领取'}</p><p className="mt-0.5 text-xs text-zinc-400">{account.plan.codingplan_free ? `剩余 ${account.plan.codingplan_free.remaining_days} 天` : '—'}</p></div></TableCell>
                       <TableCell><div className="min-w-[340px]"><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="text-zinc-500">{usage.label}</span><span className={usage.percent >= 90 ? 'text-red-600' : 'text-zinc-500'}>{usage.percent.toFixed(0)}%</span></div><Progress aria-label="额度使用率" color={usage.percent >= 90 ? 'danger' : usage.percent >= 70 ? 'warning' : 'primary'} size="sm" value={Math.min(usage.percent, 100)} />{usage.resetAt ? <div className="mt-1 flex items-center justify-between gap-4 whitespace-nowrap text-[11px] text-zinc-400"><span>下一次重置时间:{formatResetTime(usage.resetAt)}</span><ResetCountdown resetAt={usage.resetAt} secondsUntilReset={usage.secondsUntilReset} snapshotAt={snapshotAt} /></div> : <p className="mt-1 text-[11px] text-zinc-400">等待窗口刷新</p>}</div></TableCell>
                       <TableCell><span className="font-medium text-zinc-700">{account.models.length}</span></TableCell>
@@ -398,7 +401,7 @@ export default function AccountsPage() {
       </Modal>
 
       <Modal isOpen={editModal.isOpen} radius="sm" size="lg" onOpenChange={editModal.onOpenChange}>
-        <ModalContent>{(onClose) => <><ModalHeader>编辑账号</ModalHeader><ModalBody><div className="space-y-5"><Input isRequired label="账号名称" labelPlacement="outside" radius="sm" value={editName} onValueChange={setEditName} /><div className="flex items-center justify-between gap-4 rounded-md border border-zinc-200 px-4 py-3"><div><p className="text-sm font-medium text-zinc-800">定时领取 Coding Plan</p><code className="mt-1 block font-mono text-xs text-zinc-400">{editCron || '0 10 * * *'}</code></div><Switch aria-label="定时领取 Coding Plan" isSelected={editScheduleEnabled} size="sm" onValueChange={setEditScheduleEnabled} /></div><Input isRequired={editScheduleEnabled} isDisabled={!editScheduleEnabled} label="CRON 表达式" labelPlacement="outside" placeholder="0 10 * * *" radius="sm" value={editCron} onValueChange={setEditCron} /></div></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="primary" isLoading={busy === `edit:${editing?.id}`} radius="sm" onPress={() => void saveAccount()}>保存</Button></ModalFooter></>}</ModalContent>
+        <ModalContent>{(onClose) => <><ModalHeader>编辑账号</ModalHeader><ModalBody><div className="space-y-5"><Input isRequired label="账号名称" labelPlacement="outside" radius="sm" value={editName} onValueChange={setEditName} /><Textarea label="备注" labelPlacement="outside" minRows={3} placeholder="添加账号用途、归属等备注" radius="sm" value={editNote} onValueChange={setEditNote} /><div className="flex items-center justify-between gap-4 rounded-md border border-zinc-200 px-4 py-3"><div><p className="text-sm font-medium text-zinc-800">定时领取 Coding Plan</p><code className="mt-1 block font-mono text-xs text-zinc-400">{editCron || '0 10 * * *'}</code></div><Switch aria-label="定时领取 Coding Plan" isSelected={editScheduleEnabled} size="sm" onValueChange={setEditScheduleEnabled} /></div><Input isRequired={editScheduleEnabled} isDisabled={!editScheduleEnabled} label="CRON 表达式" labelPlacement="outside" placeholder="0 10 * * *" radius="sm" value={editCron} onValueChange={setEditCron} /></div></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="primary" isLoading={busy === `edit:${editing?.id}`} radius="sm" onPress={() => void saveAccount()}>保存</Button></ModalFooter></>}</ModalContent>
       </Modal>
 
       <Modal isOpen={logsModal.isOpen} radius="sm" scrollBehavior="inside" size="4xl" onOpenChange={logsModal.onOpenChange}>

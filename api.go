@@ -39,6 +39,7 @@ func (a *API) HandleAccounts(w http.ResponseWriter, _ *http.Request) {
 func (a *API) HandleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Name          *string            `json:"name"`
+		Note          *string            `json:"note"`
 		Enabled       *bool              `json:"enabled"`
 		ClaimSchedule *PlanClaimSchedule `json:"plan_claim_schedule"`
 	}
@@ -61,6 +62,9 @@ func (a *API) HandleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 	view, err := a.store.UpdateAccount(accountID, func(account *Account) error {
 		if request.Name != nil && strings.TrimSpace(*request.Name) != "" {
 			account.Name = strings.TrimSpace(*request.Name)
+		}
+		if request.Note != nil {
+			account.Note = strings.TrimSpace(*request.Note)
 		}
 		if request.Enabled != nil {
 			account.Enabled = *request.Enabled

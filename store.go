@@ -156,6 +156,7 @@ type PlanClaimLog struct {
 type Account struct {
 	ID             string             `json:"id"`
 	Name           string             `json:"name"`
+	Note           string             `json:"note,omitempty"`
 	Status         string             `json:"status"`
 	Enabled        bool               `json:"enabled"`
 	Credentials    OAuthCredentials   `json:"credentials"`
@@ -178,6 +179,7 @@ type Account struct {
 type AccountView struct {
 	ID             string            `json:"id"`
 	Name           string            `json:"name"`
+	Note           string            `json:"note"`
 	Status         string            `json:"status"`
 	Enabled        bool              `json:"enabled"`
 	User           UserInfo          `json:"user"`
@@ -202,7 +204,7 @@ func (a Account) View() AccountView {
 		claimSchedule = *a.ClaimSchedule
 	}
 	view := AccountView{
-		ID: a.ID, Name: a.Name, Status: a.Status, Enabled: a.Enabled, User: a.User,
+		ID: a.ID, Name: a.Name, Note: a.Note, Status: a.Status, Enabled: a.Enabled, User: a.User,
 		Plan: a.Plan, Models: append([]CodingPlanModel(nil), a.Models...), ProviderUsage: a.ProviderUsage,
 		ClaimSchedule: claimSchedule,
 		RequestCount:  a.RequestCount, InputTokens: a.InputTokens, OutputTokens: a.OutputTokens,
@@ -400,6 +402,7 @@ func (s *Store) UpsertAccount(account Account, accessToken, refreshToken string)
 		account.OutputTokens = existing.OutputTokens
 		account.LastUsedAt = existing.LastUsedAt
 		account.ClaimSchedule = existing.ClaimSchedule
+		account.Note = existing.Note
 		if strings.TrimSpace(account.Name) == "" {
 			account.Name = existing.Name
 		}

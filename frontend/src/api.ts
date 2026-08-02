@@ -114,6 +114,7 @@ export interface PlanClaimResult {
 export interface Account {
   id: string;
   name: string;
+  note: string;
   status: 'active' | 'paused' | 'error' | 'syncing';
   enabled: boolean;
   user: UserInfo;
