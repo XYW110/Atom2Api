@@ -255,6 +255,11 @@ export interface SettingsResponse {
   loaded_at: string;
 }
 
+export interface UserAgentCheckResponse {
+  version: string;
+  user_agent: string;
+}
+
 export class APIError extends Error {
   status: number;
 

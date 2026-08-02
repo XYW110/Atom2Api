@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AlertCircle, Bug, Check, KeyRound, Network, Save, Settings2, ShieldAlert } from 'lucide-react';
-import { Button, Chip, Input, Skeleton, Switch } from '@heroui/react';
+import { AlertCircle, Bug, Check, KeyRound, Network, RefreshCw, Save, Settings2, ShieldAlert } from 'lucide-react';
+import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Switch, Tooltip, useDisclosure } from '@heroui/react';
 import { PageShell, StatusDot } from '../components/PageShell';
 import { useToast } from '../components/Toast';
-import { apiFetch, type SettingsResponse, errorMessage, jsonRequest } from '../api';
+import { apiFetch, type SettingsResponse, type UserAgentCheckResponse, errorMessage, jsonRequest } from '../api';
 
 type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds'>;
 
@@ -18,8 +18,12 @@ export default function SettingsPage() {
   const [signerToken, setSignerToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [checkingUserAgent, setCheckingUserAgent] = useState(false);
+  const [replacingUserAgent, setReplacingUserAgent] = useState(false);
+  const [userAgentCandidate, setUserAgentCandidate] = useState<UserAgentCheckResponse | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const userAgentConfirmation = useDisclosure();
   const { showToast } = useToast();
 
   const load = useCallback(async () => {
@@ -78,6 +82,41 @@ export default function SettingsPage() {
     }
   };
 
+  const checkUserAgent = async () => {
+    setCheckingUserAgent(true);
+    try {
+      const result = await apiFetch<UserAgentCheckResponse>('/api/settings/user-agent/check', { method: 'POST' });
+      if (form.user_agent.trim() === result.user_agent) {
+        showToast('success', 'User-Agent 已是最新', result.user_agent);
+        return;
+      }
+      setUserAgentCandidate(result);
+      userAgentConfirmation.onOpen();
+    } catch (requestError) {
+      showToast('error', '检查 User-Agent 失败', errorMessage(requestError, '无法读取 AtomCode 版本'));
+    } finally {
+      setCheckingUserAgent(false);
+    }
+  };
+
+  const replaceUserAgent = async () => {
+    if (!userAgentCandidate) return;
+    setReplacingUserAgent(true);
+    try {
+      const response = await apiFetch<SettingsResponse>('/api/settings', jsonRequest('PUT', { user_agent: userAgentCandidate.user_agent }));
+      setSettings(response);
+      setForm((current) => ({ ...current, user_agent: response.user_agent }));
+      setSaved(false);
+      setError('');
+      userAgentConfirmation.onClose();
+      showToast('success', 'User-Agent 已替换', response.user_agent);
+    } catch (requestError) {
+      showToast('error', '替换 User-Agent 失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setReplacingUserAgent(false);
+    }
+  };
+
   const isDirty = Boolean(settings) && (
     form.user_agent !== settings?.user_agent || form.platform_base_url !== settings?.platform_base_url ||
     form.codingplan_api_url !== settings?.codingplan_api_url || form.gateway_url !== settings?.gateway_url ||
@@ -99,7 +138,7 @@ export default function SettingsPage() {
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <div className="flex items-center gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600"><Settings2 size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">请求参数</h2><p className="mt-0.5 text-xs text-zinc-500">上游客户端标识与超时</p></div></div>
-          <div className="grid gap-5 px-5 py-6 sm:grid-cols-[minmax(0,1fr)_220px] sm:px-6"><Input isRequired label="User-Agent" labelPlacement="outside" radius="sm" value={form.user_agent} classNames={{ input: 'font-mono text-sm' }} onValueChange={(value) => update('user_agent', value)} /><Input isRequired label="请求超时（秒）" labelPlacement="outside" max={600} min={5} radius="sm" type="number" value={String(form.request_timeout_seconds)} onValueChange={(value) => update('request_timeout_seconds', Number(value) || 0)} /></div>
+          <div className="grid gap-5 px-5 py-6 sm:grid-cols-[minmax(0,1fr)_220px] sm:px-6"><Input isRequired label="User-Agent" labelPlacement="outside" radius="sm" value={form.user_agent} classNames={{ input: 'font-mono text-sm' }} endContent={<Tooltip content="检查 AtomCode 最新版本"><Button isIconOnly aria-label="检查 AtomCode User-Agent" isDisabled={loading} isLoading={checkingUserAgent} radius="sm" size="sm" type="button" variant="light" onPress={() => void checkUserAgent()}>{checkingUserAgent ? null : <RefreshCw size={16} />}</Button></Tooltip>} onValueChange={(value) => update('user_agent', value)} /><Input isRequired label="请求超时（秒）" labelPlacement="outside" max={600} min={5} radius="sm" type="number" value={String(form.request_timeout_seconds)} onValueChange={(value) => update('request_timeout_seconds', Number(value) || 0)} /></div>
         </section>
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -117,6 +156,10 @@ export default function SettingsPage() {
 
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-zinc-400">配置文件：{settings?.data_path ? 'config.json' : '—'}</span><div className="flex items-center justify-end gap-3">{saved ? <span className="flex items-center gap-1.5 text-sm text-emerald-700" role="status"><Check size={16} />已保存</span> : null}<Button color="primary" isDisabled={!isDirty} isLoading={saving} radius="sm" startContent={saving ? null : <Save size={16} />} type="submit">保存设置</Button></div></div>
       </form>
+
+      <Modal isOpen={userAgentConfirmation.isOpen} radius="sm" size="sm" onOpenChange={userAgentConfirmation.onOpenChange}>
+        <ModalContent>{(onClose) => <><ModalHeader>更新 User-Agent</ModalHeader><ModalBody><p className="text-sm leading-6 text-zinc-600">AtomCode 当前版本为 <code className="font-mono font-semibold text-zinc-900">{userAgentCandidate?.version}</code>，是否将 User-Agent 从 <code className="break-all font-mono text-zinc-700">{form.user_agent}</code> 替换为 <code className="break-all font-mono font-semibold text-zinc-900">{userAgentCandidate?.user_agent}</code>？</p></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>保留当前值</Button><Button color="primary" isLoading={replacingUserAgent} radius="sm" onPress={() => void replaceUserAgent()}>替换</Button></ModalFooter></>}</ModalContent>
+      </Modal>
     </PageShell>
   );
 }

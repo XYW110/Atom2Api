@@ -62,6 +62,7 @@ func main() {
 	proxy := NewProxy(config, store, models, oauth)
 	api := NewAPI(store, oauth, codingPlan, models, proxy)
 	releaseChecker := NewReleaseChecker(version)
+	userAgentChecker := NewUserAgentChecker()
 	if err := api.planClaims.Start(); err != nil {
 		log.Fatal(err)
 	}
@@ -91,6 +92,7 @@ func main() {
 	adminMux.HandleFunc("GET /api/version", releaseChecker.HandleVersion)
 	adminMux.HandleFunc("GET /api/settings", handleGetSettings(config))
 	adminMux.HandleFunc("PUT /api/settings", handleUpdateSettings(config))
+	adminMux.HandleFunc("POST /api/settings/user-agent/check", userAgentChecker.HandleCheck)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", handleHealth)
