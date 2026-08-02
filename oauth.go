@@ -57,6 +57,7 @@ type OAuthManager struct {
 	config     *ConfigManager
 	store      *Store
 	codingPlan *CodingPlanClient
+	planClaims *PlanClaimService
 	client     *http.Client
 	mu         sync.Mutex
 	pending    map[string]*pendingOAuth
@@ -67,6 +68,10 @@ func NewOAuthManager(config *ConfigManager, store *Store, codingPlan *CodingPlan
 		config: config, store: store, codingPlan: codingPlan,
 		client: &http.Client{Timeout: 15 * time.Second}, pending: map[string]*pendingOAuth{},
 	}
+}
+
+func (m *OAuthManager) SetPlanClaimService(planClaims *PlanClaimService) {
+	m.planClaims = planClaims
 }
 
 func (m *OAuthManager) Start(ctx context.Context) (OAuthStart, error) {
@@ -172,10 +177,16 @@ func (m *OAuthManager) Poll(ctx context.Context, id string) (OAuthPollResult, er
 	if err != nil {
 		return OAuthPollResult{}, err
 	}
-	if _, err := m.codingPlan.ClaimAndSync(ctx, view.ID); err != nil {
+	var claimErr error
+	if m.planClaims != nil {
+		_, claimErr = m.planClaims.Claim(ctx, view.ID, planClaimTriggerManual)
+	} else {
+		_, claimErr = m.codingPlan.ClaimAndSync(ctx, view.ID)
+	}
+	if claimErr != nil {
 		_, _ = m.store.UpdateAccount(view.ID, func(account *Account) error {
 			account.Status = "error"
-			account.LastError = err.Error()
+			account.LastError = claimErr.Error()
 			return nil
 		})
 	}

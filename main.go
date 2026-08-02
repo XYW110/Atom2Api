@@ -61,6 +61,7 @@ func main() {
 	models := NewModelRouter(store)
 	proxy := NewProxy(config, store, models, oauth)
 	api := NewAPI(store, oauth, codingPlan, models, proxy)
+	oauth.SetPlanClaimService(api.planClaims)
 	releaseChecker := NewReleaseChecker(version)
 	userAgentChecker := NewUserAgentChecker()
 	if err := api.planClaims.Start(); err != nil {
