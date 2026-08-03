@@ -79,30 +79,6 @@ docker compose up -d
 
 Open `http://localhost:8080` after the container starts. Data is stored in the local `data/` directory. After the first launch, open the console and change the default password.
 
-## Releases
-
-Pushing a semantic-version tag such as `v1.2.0` triggers GitHub Actions to test the project, build the frontend, publish a GitHub Release, and push a multi-platform `linux/amd64` and `linux/arm64` image to [`cnluminous/atom2api`](https://hub.docker.com/r/cnluminous/atom2api). Stable releases publish both the version tag (for example, `1.2.0`) and `latest`; prereleases publish only their version tag and do not replace `latest`. The GitHub Release contains Linux, Windows, and macOS packages for amd64 and arm64, together with `SHA256SUMS`.
-
-Before the first Docker publication, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` under **Settings > Secrets and variables > Actions** in the GitHub repository. Use a Docker Hub access token with read and write permissions instead of an account password.
-
-From a clean branch that is synchronized with its upstream, run the release helper with PowerShell 7:
-
-```powershell
-pwsh ./scripts/release.ps1 1.2.0
-```
-
-The helper validates the version, fetches tags, verifies the frontend and backend, creates an annotated `v1.2.0` tag, and pushes only that tag. Use `-DryRun` to perform all local checks without creating or pushing a tag. Release candidates such as `1.2.0-rc.1` are published as GitHub pre-releases.
-
-To build the same archives locally without publishing a release:
-
-```powershell
-pwsh ./scripts/build-artifacts.ps1 1.2.0
-```
-
-Run `atom2api --version` to inspect the version embedded in a release binary. Local development builds report `dev`.
-
-After signing in, the management console displays the running version in the sidebar and checks the latest stable GitHub Release. When a newer version is available, it shows the latest version and release notes with a link to the GitHub Release. The check is performed by the server and cached for a short period; the service needs outbound access to `api.github.com` for this feature.
-
 ## Usage
 
 1. Sign in to the console and open **Accounts**.

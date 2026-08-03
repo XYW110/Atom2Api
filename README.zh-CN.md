@@ -79,30 +79,6 @@ docker compose up -d
 
 容器启动后访问 `http://localhost:8080`。数据保存在本地 `data/` 目录。首次启动后访问控制台修改默认密码。
 
-## 版本发布
-
-推送 `v1.2.0` 形式的语义化版本标签后，GitHub Actions 会自动执行测试、构建前端、发布 GitHub Release，并将 `linux/amd64` 和 `linux/arm64` 多架构镜像推送至 [`cnluminous/atom2api`](https://hub.docker.com/r/cnluminous/atom2api)。稳定版本会同时发布版本号标签（例如 `1.2.0`）和 `latest`；预发布版本只发布对应版本号标签，不会覆盖 `latest`。GitHub Release 包含 Linux、Windows、macOS 的 amd64/arm64 压缩包以及 `SHA256SUMS` 校验文件。
-
-首次发布 Docker 镜像前，需要在 GitHub 仓库的 **Settings > Secrets and variables > Actions** 中添加 `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`。请使用具有读写权限的 Docker Hub Access Token，不要使用账号密码。
-
-在已与上游同步且工作树干净的分支中，使用 PowerShell 7 运行发布脚本：
-
-```powershell
-pwsh ./scripts/release.ps1 1.2.0
-```
-
-脚本会校验版本、拉取远端标签、验证前后端、创建带说明的 `v1.2.0` 标签，并且只推送该标签。添加 `-DryRun` 可仅执行本地检查，不创建或推送标签。`1.2.0-rc.1` 等候选版本会发布为 GitHub 预发布版本。
-
-如需仅在本地生成同样的压缩包而不发布版本，可运行：
-
-```powershell
-pwsh ./scripts/build-artifacts.ps1 1.2.0
-```
-
-运行 `atom2api --version` 可查看发布二进制中注入的版本号；本地开发构建显示为 `dev`。
-
-登录管理控制台后，侧边栏会显示当前运行版本，并检查 GitHub 最新稳定版 Release。如有新版本，会展示最新版本号和更新日志，并提供 GitHub Release 链接。检查由服务端执行并在短时间内缓存；此功能需要服务能够访问 `api.github.com`。
-
 ## 使用流程
 
 1. 登录控制台，进入“账号管理”。
