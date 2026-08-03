@@ -216,6 +216,8 @@ export interface DashboardResponse {
     key_name: string;
     status: number;
     latency_ms: number;
+    first_token_latency_ms?: number;
+    completion_latency_ms?: number;
     input_tokens: number;
     output_tokens: number;
     streaming: boolean;
@@ -233,6 +235,8 @@ export interface AuditRecordSummary {
   key_name: string;
   status: number;
   latency_ms: number;
+  first_token_latency_ms?: number;
+  completion_latency_ms?: number;
   input_tokens: number;
   output_tokens: number;
   cached_tokens?: number;

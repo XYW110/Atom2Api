@@ -60,6 +60,22 @@ function formatLatency(milliseconds: number) {
   return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 2 : 1)} s`;
 }
 
+function LatencyBreakdown({ record }: { record: Pick<AuditRecordSummary, 'streaming' | 'latency_ms' | 'first_token_latency_ms' | 'completion_latency_ms'> }) {
+  if (!record.streaming) {
+    return <div className="min-w-28 whitespace-nowrap text-[11px] tabular-nums text-zinc-500"><p><span className="text-zinc-400">首字</span> 不适用</p><p className="mt-1 flex items-center gap-1"><Clock3 size={11} className="text-zinc-400" /><span className="text-zinc-400">耗时</span> {formatLatency(record.latency_ms)}</p></div>;
+  }
+  const firstToken = record.first_token_latency_ms === undefined ? '未记录' : formatLatency(record.first_token_latency_ms);
+  const completion = record.completion_latency_ms === undefined ? '未记录' : formatLatency(record.completion_latency_ms);
+  return (
+    <Tooltip content={`请求总耗时 ${formatLatency(record.latency_ms)}`}>
+      <div className="min-w-28 whitespace-nowrap text-[11px] tabular-nums text-zinc-500">
+        <p><span className="text-zinc-400">首字</span> {firstToken}</p>
+        <p className="mt-1"><span className="text-zinc-400">完成</span> {completion}</p>
+      </div>
+    </Tooltip>
+  );
+}
+
 function formatRequestTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -273,7 +289,7 @@ export default function AuditPage() {
                       <span className="font-mono text-xs font-semibold">{record.status || '—'}</span>
                     </Button>
                   </TableCell>
-                  <TableCell><span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums text-zinc-600"><Clock3 size={14} className="text-zinc-400" />{formatLatency(record.latency_ms)}</span></TableCell>
+                  <TableCell><LatencyBreakdown record={record} /></TableCell>
                   <TableCell><time className="whitespace-nowrap tabular-nums text-zinc-500" dateTime={record.timestamp}>{formatRequestTime(record.timestamp)}</time></TableCell>
                 </TableRow>
               )}
@@ -302,7 +318,7 @@ export default function AuditPage() {
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">请求</p><p className="mt-1 truncate font-mono text-xs font-medium text-zinc-800"><span className="mr-2 text-blue-600">{detail.method}</span>{detail.path}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">模型</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.model}>{detail.model || '未知模型'}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">密钥</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.key_name || undefined}>{detail.key_name || '—'}</p></div>
-                  <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">状态与耗时</p><div className="mt-1 flex items-center gap-2"><Chip color={statusColor(detail.status)} radius="sm" size="sm" variant="flat">{detail.status}</Chip><span className="text-xs tabular-nums text-zinc-600">{formatLatency(detail.latency_ms)}</span></div></div>
+                  <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">状态与耗时</p><div className="mt-1 flex items-center gap-3"><Chip color={statusColor(detail.status)} radius="sm" size="sm" variant="flat">{detail.status}</Chip><LatencyBreakdown record={detail} /></div></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">请求时间</p><time className="mt-1 block whitespace-nowrap text-xs tabular-nums text-zinc-700" dateTime={detail.timestamp}>{formatRequestTime(detail.timestamp)}</time></div>
                 </div>
                 {detail.error ? <div className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-5 py-3 text-xs text-red-700"><AlertCircle className="mt-0.5 shrink-0" size={14} /><span className="break-all">{detail.error}</span></div> : null}

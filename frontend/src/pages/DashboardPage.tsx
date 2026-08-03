@@ -20,6 +20,13 @@ function trendLabel(start: string, range: string) {
     : `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+function recentLatency(request: NonNullable<DashboardResponse['recent_requests']>[number]) {
+  if (!request.streaming) return `首字 不适用 · 耗时 ${request.latency_ms.toLocaleString()} ms`;
+  const firstToken = request.first_token_latency_ms === undefined ? '未记录' : `${request.first_token_latency_ms.toLocaleString()} ms`;
+  const completion = request.completion_latency_ms === undefined ? '未记录' : `${request.completion_latency_ms.toLocaleString()} ms`;
+  return `首字 ${firstToken} · 完成 ${completion}`;
+}
+
 export default function DashboardPage() {
   const [range, setRange] = useState('24h');
   const [data, setData] = useState<DashboardResponse>(emptyDashboard);
@@ -125,7 +132,7 @@ export default function DashboardPage() {
           <Table aria-label="最近请求" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3.5 text-sm' }}>
             <TableHeader><TableColumn>请求 ID</TableColumn><TableColumn>模型</TableColumn><TableColumn>密钥</TableColumn><TableColumn>账号</TableColumn><TableColumn>延迟</TableColumn><TableColumn>Tokens</TableColumn><TableColumn>状态</TableColumn><TableColumn>时间</TableColumn></TableHeader>
             <TableBody items={data.recent_requests || []} emptyContent={loading ? '正在加载' : '暂无请求记录'}>
-              {(request) => <TableRow key={request.id}><TableCell><code className="text-xs text-zinc-500">{request.id}</code></TableCell><TableCell><span className="font-medium text-zinc-800">{request.model}</span></TableCell><TableCell>{request.key_name || '—'}</TableCell><TableCell>{request.account_name || '—'}</TableCell><TableCell>{request.latency_ms.toLocaleString()} ms</TableCell><TableCell>{formatTokens(request.input_tokens + request.output_tokens)}</TableCell><TableCell><Chip color={request.status >= 200 && request.status < 400 ? 'success' : 'danger'} radius="sm" size="sm" variant="flat">{request.status}</Chip></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(request.timestamp)}</span></TableCell></TableRow>}
+              {(request) => <TableRow key={request.id}><TableCell><code className="text-xs text-zinc-500">{request.id}</code></TableCell><TableCell><span className="font-medium text-zinc-800">{request.model}</span></TableCell><TableCell>{request.key_name || '—'}</TableCell><TableCell>{request.account_name || '—'}</TableCell><TableCell><span className="whitespace-nowrap text-xs tabular-nums text-zinc-600">{recentLatency(request)}</span></TableCell><TableCell>{formatTokens(request.input_tokens + request.output_tokens)}</TableCell><TableCell><Chip color={request.status >= 200 && request.status < 400 ? 'success' : 'danger'} radius="sm" size="sm" variant="flat">{request.status}</Chip></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(request.timestamp)}</span></TableCell></TableRow>}
             </TableBody>
           </Table>
         </div>

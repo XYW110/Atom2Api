@@ -492,7 +492,7 @@ type chatStreamChunk struct {
 	Usage json.RawMessage `json:"usage"`
 }
 
-func (p *Proxy) streamChatAsResponses(w http.ResponseWriter, response *http.Response, route ModelRoute, context *responsesCompatContext) (tokenUsage, string) {
+func (p *Proxy) streamChatAsResponses(w http.ResponseWriter, response *http.Response, route ModelRoute, context *responsesCompatContext, markFirstToken func()) (tokenUsage, string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeOpenAIError(w, http.StatusInternalServerError, "server_error", "streaming is not supported by this server")
@@ -519,6 +519,9 @@ func (p *Proxy) streamChatAsResponses(w http.ResponseWriter, response *http.Resp
 				break
 			}
 			if len(data) > 0 {
+				if streamChunkHasOutput(data) {
+					markFirstToken()
+				}
 				if chunkErr := state.consume(w, flusher, data); chunkErr != nil {
 					errorText = chunkErr.Error()
 					break

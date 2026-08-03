@@ -122,6 +122,12 @@ func (p *Proxy) HandleModels(w http.ResponseWriter, _ *http.Request, _ APIKey) {
 
 func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey) {
 	started := time.Now()
+	var firstTokenAt time.Time
+	markFirstToken := func() {
+		if firstTokenAt.IsZero() {
+			firstTokenAt = time.Now()
+		}
+	}
 	requestID := randomID("req")
 	w.Header().Set("X-Request-Id", requestID)
 	debugEnabled := p.config.Snapshot().AuditDebugEnabled
@@ -134,7 +140,12 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		audit.RequestHeaders = auditHeaders(r.Header)
 	}
 	defer func() {
-		audit.LatencyMS = time.Since(started).Milliseconds()
+		finished := time.Now()
+		audit.LatencyMS = finished.Sub(started).Milliseconds()
+		if audit.Streaming && !firstTokenAt.IsZero() {
+			audit.FirstTokenLatencyMS = firstTokenAt.Sub(started).Milliseconds()
+			audit.CompletionLatencyMS = finished.Sub(firstTokenAt).Milliseconds()
+		}
 		audit.Status = captured.status
 		if audit.Status == 0 {
 			audit.Status = http.StatusInternalServerError
@@ -253,7 +264,7 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 	}
 	if responsesChatCompat && response.StatusCode >= 200 && response.StatusCode < 300 {
 		if streaming {
-			usage, errorText := p.streamChatAsResponses(w, response, route, compatContext)
+			usage, errorText := p.streamChatAsResponses(w, response, route, compatContext, markFirstToken)
 			audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
 			audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
 			audit.Error = errorText
@@ -266,7 +277,7 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		return
 	}
 	if streaming && response.StatusCode >= 200 && response.StatusCode < 300 {
-		usage, errorText := p.streamResponse(w, response, route)
+		usage, errorText := p.streamResponse(w, response, route, markFirstToken)
 		audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
 		audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
 		audit.Error = errorText
@@ -344,7 +355,7 @@ func (p *Proxy) bufferedResponse(w http.ResponseWriter, response *http.Response,
 	return usage, ""
 }
 
-func (p *Proxy) streamResponse(w http.ResponseWriter, response *http.Response, route ModelRoute) (tokenUsage, string) {
+func (p *Proxy) streamResponse(w http.ResponseWriter, response *http.Response, route ModelRoute, markFirstToken func()) (tokenUsage, string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeOpenAIError(w, http.StatusInternalServerError, "server_error", "streaming is not supported by this server")
@@ -365,6 +376,9 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, response *http.Response, r
 			if bytes.HasPrefix(trimmed, []byte("data:")) {
 				data := bytes.TrimSpace(bytes.TrimPrefix(trimmed, []byte("data:")))
 				if len(data) > 0 && !bytes.Equal(data, []byte("[DONE]")) {
+					if streamChunkHasOutput(data) {
+						markFirstToken()
+					}
 					chunkUsage := extractUsage(data)
 					if chunkUsage.Input > 0 || chunkUsage.Output > 0 {
 						usage = chunkUsage
@@ -387,6 +401,43 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, response *http.Response, r
 		}
 	}
 	return usage, errorText
+}
+
+func streamChunkHasOutput(data []byte) bool {
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return false
+	}
+	if eventType, _ := payload["type"].(string); strings.HasSuffix(eventType, ".delta") && hasStreamDelta(payload["delta"]) {
+		return true
+	}
+	choices, _ := payload["choices"].([]any)
+	for _, rawChoice := range choices {
+		choice, _ := rawChoice.(map[string]any)
+		delta, _ := choice["delta"].(map[string]any)
+		for _, field := range []string{"content", "reasoning_content", "reasoning"} {
+			if hasStreamDelta(delta[field]) {
+				return true
+			}
+		}
+		if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasStreamDelta(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed != ""
+	case []any:
+		return len(typed) > 0
+	case map[string]any:
+		return len(typed) > 0
+	default:
+		return false
+	}
 }
 
 func (p *Proxy) applySignature(ctx context.Context, request *http.Request, body []byte, route ModelRoute) error {

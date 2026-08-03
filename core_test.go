@@ -200,6 +200,7 @@ func TestProxyNonStreamingRewritesModelAndRecordsUsage(t *testing.T) {
 		var request map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&request)
 		upstreamModel, _ = request["model"].(string)
+		time.Sleep(10 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion","model":"upstream-model","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_tokens_details":{"cached_tokens":3}}}`))
 	}))
@@ -237,6 +238,9 @@ func TestProxyNonStreamingRewritesModelAndRecordsUsage(t *testing.T) {
 	if len(records) != 1 || records[0].InputTokens != 11 || records[0].OutputTokens != 7 || records[0].CachedTokens != 3 || records[0].AccountID != account.ID {
 		t.Fatalf("usage records = %#v", records)
 	}
+	if records[0].LatencyMS < 5 || records[0].FirstTokenLatencyMS != 0 || records[0].CompletionLatencyMS != 0 {
+		t.Fatalf("non-stream timing = %#v", records[0])
+	}
 	if records[0].Method != http.MethodPost || records[0].RequestBody != "" || records[0].ResponseBody != "" || len(records[0].RequestHeaders) != 0 || len(records[0].ResponseHeaders) != 0 {
 		t.Fatalf("audit debug details were recorded while disabled: %#v", records[0])
 	}
@@ -256,8 +260,14 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
+		time.Sleep(5 * time.Millisecond)
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-2","model":"upstream-model","choices":[{"delta":{"role":"assistant"}}]}` + "\n\n"))
+		flusher.Flush()
+		time.Sleep(10 * time.Millisecond)
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-2","model":"upstream-model","choices":[{"delta":{"content":"hi"}}]}` + "\n\n"))
+		flusher.Flush()
+		time.Sleep(15 * time.Millisecond)
 		for _, line := range []string{
-			`data: {"id":"chatcmpl-2","model":"upstream-model","choices":[{"delta":{"content":"hi"}}]}` + "\n\n",
 			`data: {"id":"chatcmpl-2","model":"upstream-model","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4,"total_tokens":24}}` + "\n\n",
 			"data: [DONE]\n\n",
 		} {
@@ -285,6 +295,9 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 	if len(records) != 1 || !records[0].Streaming || records[0].InputTokens != 20 || records[0].OutputTokens != 4 {
 		t.Fatalf("stream usage = %#v", records)
 	}
+	if records[0].FirstTokenLatencyMS < 10 || records[0].CompletionLatencyMS < 10 || records[0].LatencyMS < records[0].FirstTokenLatencyMS+records[0].CompletionLatencyMS {
+		t.Fatalf("stream timing = %#v", records[0])
+	}
 	if records[0].Method != http.MethodPost || records[0].RequestBody != "" || records[0].ResponseBody != "" {
 		t.Fatalf("stream audit debug details were recorded while disabled: %#v", records[0])
 	}
@@ -293,12 +306,35 @@ func TestProxyStreamingForwardsSSEAndRecordsFinalUsage(t *testing.T) {
 	}
 }
 
+func TestStreamChunkHasOutputIgnoresMetadataEvents(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{name: "responses created", data: `{"type":"response.created","response":{"id":"resp_1"}}`, want: false},
+		{name: "chat role", data: `{"choices":[{"delta":{"role":"assistant"}}]}`, want: false},
+		{name: "chat text", data: `{"choices":[{"delta":{"content":"hello"}}]}`, want: true},
+		{name: "chat tool", data: `{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}`, want: true},
+		{name: "responses text", data: `{"type":"response.output_text.delta","delta":"hello"}`, want: true},
+		{name: "responses tool", data: `{"type":"response.function_call_arguments.delta","delta":"{}"}`, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := streamChunkHasOutput([]byte(test.data)); got != test.want {
+				t.Fatalf("streamChunkHasOutput() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
 	_, store := newTestStore(t)
 	now := time.Now().UTC()
 	record := UsageRecord{
 		ID: "req_audit_detail", Timestamp: now, Path: "/v1/chat/completions", Model: "gpt-audit",
-		Status: http.StatusOK, LatencyMS: 42, InputTokens: 5, OutputTokens: 7,
+		Status: http.StatusOK, LatencyMS: 42, FirstTokenLatencyMS: 12, CompletionLatencyMS: 30,
+		InputTokens: 5, OutputTokens: 7, Streaming: true,
 		RequestBody:     `{"model":"gpt-audit","messages":[]}`,
 		ResponseBody:    `{"id":"chatcmpl-audit","choices":[]}`,
 		RequestHeaders:  map[string][]string{"Content-Type": {"application/json"}},
@@ -331,7 +367,8 @@ func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
 	if err := json.Unmarshal(listResponse.Body.Bytes(), &list); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if list.Total != 1 || len(list.Items) != 1 || list.Items[0].ID != record.ID || list.Items[0].Method != http.MethodPost || !list.Items[0].HasRequestBody || !list.Items[0].HasResponseBody {
+	if list.Total != 1 || len(list.Items) != 1 || list.Items[0].ID != record.ID || list.Items[0].Method != http.MethodPost ||
+		list.Items[0].FirstTokenLatencyMS != 12 || list.Items[0].CompletionLatencyMS != 30 || !list.Items[0].HasRequestBody || !list.Items[0].HasResponseBody {
 		t.Fatalf("audit list = %#v", list)
 	}
 
@@ -346,7 +383,8 @@ func TestAuditHandlersKeepBodiesOutOfListAndReturnDetail(t *testing.T) {
 	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode detail: %v", err)
 	}
-	if detail.Method != http.MethodPost || detail.RequestBody != record.RequestBody || detail.ResponseBody != record.ResponseBody ||
+	if detail.Method != http.MethodPost || detail.FirstTokenLatencyMS != 12 || detail.CompletionLatencyMS != 30 ||
+		detail.RequestBody != record.RequestBody || detail.ResponseBody != record.ResponseBody ||
 		detail.RequestHeaders["Content-Type"][0] != "application/json" || detail.ResponseHeaders["X-Request-Id"][0] != "upstream-request" {
 		t.Fatalf("audit detail = %#v", detail)
 	}

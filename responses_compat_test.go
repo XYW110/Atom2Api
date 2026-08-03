@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResponsesUsesConfiguredChatCompatibility(t *testing.T) {
@@ -176,8 +177,11 @@ func TestResponsesConfiguredCompatibilityRebuildsStreamingEvents(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
+		time.Sleep(10 * time.Millisecond)
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-stream","created":456,"model":"upstream-model","choices":[{"delta":{"content":"Hi "},"finish_reason":null}]}` + "\n\n"))
+		flusher.Flush()
+		time.Sleep(15 * time.Millisecond)
 		for _, event := range []string{
-			`data: {"id":"chatcmpl-stream","created":456,"model":"upstream-model","choices":[{"delta":{"content":"Hi "},"finish_reason":null}]}` + "\n\n",
 			`data: {"id":"chatcmpl-stream","created":456,"model":"upstream-model","choices":[{"delta":{"content":"there"},"finish_reason":null}]}` + "\n\n",
 			`data: {"id":"chatcmpl-stream","created":456,"model":"upstream-model","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\"city\":"}}]},"finish_reason":null}]}` + "\n\n",
 			`data: {"id":"chatcmpl-stream","created":456,"model":"upstream-model","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Hong Kong\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n",
@@ -218,6 +222,9 @@ func TestResponsesConfiguredCompatibilityRebuildsStreamingEvents(t *testing.T) {
 	records := store.UsageRecords()
 	if len(records) != 1 || !records[0].Streaming || records[0].InputTokens != 8 || records[0].OutputTokens != 6 {
 		t.Fatalf("stream usage = %#v", records)
+	}
+	if records[0].FirstTokenLatencyMS < 5 || records[0].CompletionLatencyMS < 10 {
+		t.Fatalf("compatibility stream timing = %#v", records[0])
 	}
 }
 

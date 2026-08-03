@@ -387,23 +387,25 @@ type modelDistribution struct {
 }
 
 type auditListItem struct {
-	ID              string    `json:"id"`
-	Timestamp       time.Time `json:"timestamp"`
-	Method          string    `json:"method"`
-	Path            string    `json:"path"`
-	Model           string    `json:"model"`
-	UpstreamModel   string    `json:"upstream_model"`
-	AccountName     string    `json:"account_name"`
-	KeyName         string    `json:"key_name"`
-	Status          int       `json:"status"`
-	LatencyMS       int64     `json:"latency_ms"`
-	InputTokens     int64     `json:"input_tokens"`
-	OutputTokens    int64     `json:"output_tokens"`
-	CachedTokens    int64     `json:"cached_tokens,omitempty"`
-	ReasoningTokens int64     `json:"reasoning_tokens,omitempty"`
-	Streaming       bool      `json:"streaming"`
-	HasRequestBody  bool      `json:"has_request_body"`
-	HasResponseBody bool      `json:"has_response_body"`
+	ID                  string    `json:"id"`
+	Timestamp           time.Time `json:"timestamp"`
+	Method              string    `json:"method"`
+	Path                string    `json:"path"`
+	Model               string    `json:"model"`
+	UpstreamModel       string    `json:"upstream_model"`
+	AccountName         string    `json:"account_name"`
+	KeyName             string    `json:"key_name"`
+	Status              int       `json:"status"`
+	LatencyMS           int64     `json:"latency_ms"`
+	FirstTokenLatencyMS int64     `json:"first_token_latency_ms,omitempty"`
+	CompletionLatencyMS int64     `json:"completion_latency_ms,omitempty"`
+	InputTokens         int64     `json:"input_tokens"`
+	OutputTokens        int64     `json:"output_tokens"`
+	CachedTokens        int64     `json:"cached_tokens,omitempty"`
+	ReasoningTokens     int64     `json:"reasoning_tokens,omitempty"`
+	Streaming           bool      `json:"streaming"`
+	HasRequestBody      bool      `json:"has_request_body"`
+	HasResponseBody     bool      `json:"has_response_body"`
 }
 
 type auditListResponse struct {
@@ -428,7 +430,8 @@ func auditItem(record UsageRecord, accountName, keyName string) auditListItem {
 	return auditListItem{
 		ID: record.ID, Timestamp: record.Timestamp, Method: method, Path: record.Path,
 		Model: record.Model, UpstreamModel: record.UpstreamModel, AccountName: accountName, KeyName: keyName,
-		Status: record.Status, LatencyMS: record.LatencyMS, InputTokens: record.InputTokens,
+		Status: record.Status, LatencyMS: record.LatencyMS,
+		FirstTokenLatencyMS: record.FirstTokenLatencyMS, CompletionLatencyMS: record.CompletionLatencyMS, InputTokens: record.InputTokens,
 		OutputTokens: record.OutputTokens, CachedTokens: record.CachedTokens,
 		ReasoningTokens: record.ReasoningTokens, Streaming: record.Streaming,
 		HasRequestBody: record.RequestBody != "", HasResponseBody: record.ResponseBody != "",
