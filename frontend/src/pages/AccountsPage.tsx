@@ -306,6 +306,30 @@ export default function AccountsPage() {
     }
   };
 
+  const runBatchAction = async (action: 'claim' | 'sync') => {
+    if (accounts.length === 0) return;
+    const actionLabel = action === 'claim' ? '领取 Plan' : '同步额度';
+    setBusy(`${action}:all`);
+    try {
+      const results = await Promise.allSettled(accounts.map((account) => apiFetch(
+        `/api/accounts/${account.id}/${action}`,
+        jsonRequest('POST'),
+      )));
+      const failures = results.flatMap((result, index) => result.status === 'rejected' ? [{ account: accounts[index], reason: result.reason }] : []);
+      await load();
+      if (failures.length === 0) {
+        showToast('success', `一键${actionLabel}完成`, `${accounts.length} 个账号已全部处理成功`);
+        return;
+      }
+      const failedNames = failures.slice(0, 3).map(({ account }) => `“${account.name}”`).join('、');
+      const remaining = failures.length > 3 ? `等 ${failures.length} 个账号` : '';
+      const firstError = errorMessage(failures[0].reason, '未知错误');
+      showToast('error', `一键${actionLabel}部分失败`, `${accounts.length - failures.length} 个成功，${failures.length} 个失败；${failedNames}${remaining}：${firstError}`);
+    } finally {
+      setBusy('');
+    }
+  };
+
   const openClaimLogs = async (account: Account) => {
     setLogAccount(account);
     setClaimLogs([]);
@@ -354,6 +378,7 @@ export default function AccountsPage() {
 
   const activeCount = accounts.filter((account) => account.enabled && account.status === 'active').length;
   const providerTokens = accounts.reduce((sum, account) => sum + (account.provider_usage?.total_tokens || 0), 0);
+  const batchBusy = busy === 'claim:all' || busy === 'sync:all';
 
   return (
     <PageShell title="账号管理" description="AtomGit OAuth 账户、Coding Plan 权益与滚动额度" action={{ label: '连接 AtomGit', icon: Plus, onPress: () => void startOAuth() }}>
@@ -366,7 +391,7 @@ export default function AccountsPage() {
       </section>
 
       <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-100 p-4"><Input aria-label="搜索账号" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /></div>
+        <div className="flex flex-col gap-3 border-b border-zinc-100 p-4 sm:flex-row sm:items-center sm:justify-between"><Input aria-label="搜索账号" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /><div className="grid grid-cols-2 gap-2 sm:flex"><Button color="primary" isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'claim:all')} isLoading={busy === 'claim:all'} radius="sm" startContent={busy === 'claim:all' ? null : <Gift size={16} />} variant="flat" onPress={() => void runBatchAction('claim')}>一键领取 Plan</Button><Button isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'sync:all')} isLoading={busy === 'sync:all'} radius="sm" startContent={busy === 'sync:all' ? null : <RefreshCw size={16} />} variant="bordered" onPress={() => void runBatchAction('sync')}>一键同步额度</Button></div></div>
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto">
             <Table aria-label="AtomGit 账号列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
@@ -385,7 +410,7 @@ export default function AccountsPage() {
                       <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(account.last_sync_at)}</span></TableCell>
                       <TableCell><div className="min-w-28"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${account.plan_claim_schedule.enabled ? 'bg-emerald-500' : 'bg-zinc-300'}`} /><span className="text-xs text-zinc-600">{account.plan_claim_schedule.enabled ? '已启用' : '已停用'}</span></div><code className="mt-1 block whitespace-nowrap font-mono text-[11px] text-zinc-400">{account.plan_claim_schedule.cron}</code></div></TableCell>
                       <TableCell><Tooltip content={account.last_error || status.label}><Chip color={status.color} radius="sm" size="sm" variant="flat">{status.label}</Chip></Tooltip></TableCell>
-                      <TableCell><div className="flex min-w-56 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
+                      <TableCell><div className="flex min-w-56 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isDisabled={batchBusy} isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isDisabled={batchBusy} isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isDisabled={batchBusy} isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isDisabled={batchBusy} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
                     </TableRow>
                   );
                 }}
