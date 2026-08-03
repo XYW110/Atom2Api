@@ -74,8 +74,10 @@ func TestProxyAuditDebugRecordsBodiesAndSanitizedHeaders(t *testing.T) {
 	}
 }
 
-func TestProxyAuditForcesUpstreamErrorResponseWhenDebugDisabled(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestProxySanitizesUpstreamErrorAndKeepsAuditDetail(t *testing.T) {
+	var upstreamRequestID string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequestID = r.Header.Get("X-Request-Id")
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "30")
 		w.Header().Set("Set-Cookie", "error-session=secret")
@@ -109,11 +111,22 @@ func TestProxyAuditForcesUpstreamErrorResponseWhenDebugDisabled(t *testing.T) {
 		t.Fatalf("usage records = %#v", records)
 	}
 	record := records[0]
+	requestID := response.Header().Get("X-Request-Id")
+	if requestID == "" || record.ID != requestID || upstreamRequestID != requestID {
+		t.Fatalf("request ids = response %q, audit %q, upstream %q", requestID, record.ID, upstreamRequestID)
+	}
 	if record.RequestBody != "" || len(record.RequestHeaders) != 0 {
 		t.Fatalf("request details were recorded while debug was disabled: %#v", record)
 	}
-	if record.ResponseBody != response.Body.String() || !strings.Contains(record.ResponseBody, "quota exceeded") {
-		t.Fatalf("forced response body = %q", record.ResponseBody)
+	expectedMessage := "status_code=429,upstream request failed. request_id=" + requestID
+	if record.ResponseBody != response.Body.String() || !strings.Contains(response.Body.String(), expectedMessage) {
+		t.Fatalf("sanitized response body = %q", record.ResponseBody)
+	}
+	if strings.Contains(response.Body.String(), "quota exceeded") {
+		t.Fatalf("response exposed upstream error: %s", response.Body.String())
+	}
+	if !strings.Contains(record.Error, "quota exceeded") {
+		t.Fatalf("audit error = %q", record.Error)
 	}
 	if got := record.ResponseHeaders["Retry-After"]; len(got) != 1 || got[0] != "30" {
 		t.Fatalf("response Retry-After = %#v", got)

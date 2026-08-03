@@ -139,7 +139,7 @@ func (a *API) probeModelProtocol(ctx context.Context, account Account, token str
 		Requested: model.DisplayModelName, Upstream: model.DisplayModelName, Alias: model.DisplayModelName,
 		Model: model, Account: account, Token: token,
 	}
-	_, response, err := a.proxy.doUpstreamRequest(requestContext, route, path, body, streaming)
+	_, response, err := a.proxy.doUpstreamRequest(requestContext, route, path, body, streaming, randomID("req"))
 	if err != nil {
 		return protocolProbeResult{LatencyMS: time.Since(started).Milliseconds(), Error: err.Error()}
 	}

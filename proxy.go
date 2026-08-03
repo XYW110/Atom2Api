@@ -122,11 +122,13 @@ func (p *Proxy) HandleModels(w http.ResponseWriter, _ *http.Request, _ APIKey) {
 
 func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey) {
 	started := time.Now()
+	requestID := randomID("req")
+	w.Header().Set("X-Request-Id", requestID)
 	debugEnabled := p.config.Snapshot().AuditDebugEnabled
 	captured := &auditResponseWriter{ResponseWriter: w, captureBody: debugEnabled}
 	w = captured
 	audit := UsageRecord{
-		Timestamp: started.UTC(), Method: r.Method, Path: r.URL.Path, APIKeyID: key.ID,
+		ID: requestID, Timestamp: started.UTC(), Method: r.Method, Path: r.URL.Path, APIKeyID: key.ID,
 	}
 	if debugEnabled {
 		audit.RequestHeaders = auditHeaders(r.Header)
@@ -185,7 +187,7 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 			route.Token = refreshed
 		} else {
 			audit.Error = refreshErr.Error()
-			writeOpenAIError(w, http.StatusBadGateway, "upstream_auth_error", audit.Error)
+			writeOpenAIError(w, http.StatusBadGateway, "upstream_auth_error", upstreamFailureMessage(http.StatusBadGateway, requestID))
 			return
 		}
 	}
@@ -229,10 +231,10 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		}
 		requestPath = "/v1/chat/completions"
 	}
-	request, response, err := p.doUpstreamRequest(requestContext, route, requestPath, requestBody, streaming)
+	request, response, err := p.doUpstreamRequest(requestContext, route, requestPath, requestBody, streaming, requestID)
 	if err != nil {
 		audit.Error = err.Error()
-		writeOpenAIError(w, http.StatusBadGateway, upstreamRequestErrorCode(err), audit.Error)
+		writeOpenAIError(w, http.StatusBadGateway, upstreamRequestErrorCode(err), upstreamFailureMessage(http.StatusBadGateway, requestID))
 		return
 	}
 	defer response.Body.Close()
@@ -244,6 +246,7 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		audit.ResponseHeaders = auditHeaders(response.Header)
 	}
 	copyUpstreamHeaders(w.Header(), response.Header)
+	w.Header().Set("X-Request-Id", requestID)
 	w.Header().Set("X-Atom2api-Account", route.Account.ID)
 	if responsesChatCompat {
 		w.Header().Set(responsesFallbackHeader, "chat-completions")
@@ -256,7 +259,7 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 			audit.Error = errorText
 			return
 		}
-		usage, errorText := p.bufferedChatAsResponses(w, response, route, compatContext)
+		usage, errorText := p.bufferedChatAsResponses(w, response, route, compatContext, requestID)
 		audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
 		audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
 		audit.Error = errorText
@@ -269,13 +272,13 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		audit.Error = errorText
 		return
 	}
-	usage, errorText := p.bufferedResponse(w, response, route)
+	usage, errorText := p.bufferedResponse(w, response, route, requestID)
 	audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
 	audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
 	audit.Error = errorText
 }
 
-func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path string, body []byte, streaming bool) (*http.Request, *http.Response, error) {
+func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path string, body []byte, streaming bool, requestID string) (*http.Request, *http.Response, error) {
 	upstreamURL, err := joinUpstreamURL(route.Model.BaseURL, path)
 	if err != nil {
 		return nil, nil, err
@@ -291,7 +294,7 @@ func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path st
 		request.Header.Set("Accept", "text/event-stream")
 	}
 	request.Header.Set("User-Agent", p.config.Snapshot().UserAgent)
-	request.Header.Set("X-Request-Id", randomID("req"))
+	request.Header.Set("X-Request-Id", requestID)
 	if err := p.applySignature(ctx, request, body, route); err != nil {
 		return request, nil, &upstreamRequestError{code: "signing_error", err: fmt.Errorf("sign upstream request: %w", err)}
 	}
@@ -302,16 +305,16 @@ func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path st
 	return request, response, nil
 }
 
-func (p *Proxy) bufferedChatAsResponses(w http.ResponseWriter, response *http.Response, route ModelRoute, context *responsesCompatContext) (tokenUsage, string) {
+func (p *Proxy) bufferedChatAsResponses(w http.ResponseWriter, response *http.Response, route ModelRoute, context *responsesCompatContext, requestID string) (tokenUsage, string) {
 	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "could not read upstream response")
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", upstreamFailureMessage(http.StatusBadGateway, requestID))
 		return tokenUsage{}, "could not read upstream response"
 	}
 	converted, usage, err := chatResponseToResponses(body, route.Requested, context)
 	if err != nil {
 		message := "could not convert Chat Completions response: " + err.Error()
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", message)
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", upstreamFailureMessage(http.StatusBadGateway, requestID))
 		return tokenUsage{}, message
 	}
 	w.Header().Del("Content-Length")
@@ -321,24 +324,24 @@ func (p *Proxy) bufferedChatAsResponses(w http.ResponseWriter, response *http.Re
 	return usage, ""
 }
 
-func (p *Proxy) bufferedResponse(w http.ResponseWriter, response *http.Response, route ModelRoute) (tokenUsage, string) {
+func (p *Proxy) bufferedResponse(w http.ResponseWriter, response *http.Response, route ModelRoute, requestID string) (tokenUsage, string) {
 	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "could not read upstream response")
+		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", upstreamFailureMessage(http.StatusBadGateway, requestID))
 		return tokenUsage{}, "could not read upstream response"
 	}
 	usage := extractUsage(body)
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		body = rewriteResponseModel(body, route.Requested)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		errorText := compactError(body)
+		w.Header().Del("Content-Length")
+		writeOpenAIError(w, response.StatusCode, "upstream_error", upstreamFailureMessage(response.StatusCode, requestID))
+		return usage, errorText
 	}
+	body = rewriteResponseModel(body, route.Requested)
 	w.Header().Del("Content-Length")
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(body)
-	errorText := ""
-	if response.StatusCode < 200 || response.StatusCode >= 400 {
-		errorText = compactError(body)
-	}
-	return usage, errorText
+	return usage, ""
 }
 
 func (p *Proxy) streamResponse(w http.ResponseWriter, response *http.Response, route ModelRoute) (tokenUsage, string) {
@@ -685,6 +688,10 @@ func writeOpenAIError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]any{
 		"message": message, "type": code, "param": nil, "code": code,
 	}})
+}
+
+func upstreamFailureMessage(status int, requestID string) string {
+	return fmt.Sprintf("status_code=%d,upstream request failed. request_id=%s", status, requestID)
 }
 
 func (p *Proxy) record(record UsageRecord) {
