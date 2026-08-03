@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -262,10 +263,33 @@ func (key APIKey) View() APIKeyView {
 }
 
 type ModelSetting struct {
-	Upstream string `json:"upstream"`
-	Alias    string `json:"alias"`
-	Enabled  bool   `json:"enabled"`
-	Manual   bool   `json:"manual,omitempty"`
+	Upstream            string `json:"upstream"`
+	Alias               string `json:"alias"`
+	Enabled             bool   `json:"enabled"`
+	Manual              bool   `json:"manual,omitempty"`
+	ResponsesChatCompat bool   `json:"responses_chat_compat"`
+}
+
+func (s *ModelSetting) UnmarshalJSON(data []byte) error {
+	var value struct {
+		Upstream            string `json:"upstream"`
+		Alias               string `json:"alias"`
+		Enabled             bool   `json:"enabled"`
+		Manual              bool   `json:"manual,omitempty"`
+		ResponsesChatCompat *bool  `json:"responses_chat_compat"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	s.Upstream = value.Upstream
+	s.Alias = value.Alias
+	s.Enabled = value.Enabled
+	s.Manual = value.Manual
+	s.ResponsesChatCompat = defaultResponsesChatCompat(value.Upstream)
+	if value.ResponsesChatCompat != nil {
+		s.ResponsesChatCompat = *value.ResponsesChatCompat
+	}
+	return nil
 }
 
 type UsageRecord struct {

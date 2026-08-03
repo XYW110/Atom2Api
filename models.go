@@ -9,26 +9,28 @@ import (
 )
 
 type ModelView struct {
-	ID            string   `json:"id"`
-	Alias         string   `json:"alias"`
-	Upstream      string   `json:"upstream"`
-	ProviderType  string   `json:"provider_type"`
-	BaseURL       string   `json:"base_url"`
-	ContextWindow int      `json:"context_window"`
-	Enabled       bool     `json:"enabled"`
-	AccountCount  int      `json:"account_count"`
-	Accounts      []string `json:"accounts"`
-	Plans         []string `json:"plans"`
-	Manual        bool     `json:"manual"`
+	ID                  string   `json:"id"`
+	Alias               string   `json:"alias"`
+	Upstream            string   `json:"upstream"`
+	ProviderType        string   `json:"provider_type"`
+	BaseURL             string   `json:"base_url"`
+	ContextWindow       int      `json:"context_window"`
+	Enabled             bool     `json:"enabled"`
+	AccountCount        int      `json:"account_count"`
+	Accounts            []string `json:"accounts"`
+	Plans               []string `json:"plans"`
+	Manual              bool     `json:"manual"`
+	ResponsesChatCompat bool     `json:"responses_chat_compat"`
 }
 
 type ModelRoute struct {
-	Requested string
-	Upstream  string
-	Alias     string
-	Model     CodingPlanModel
-	Account   Account
-	Token     string
+	Requested           string
+	Upstream            string
+	Alias               string
+	ResponsesChatCompat bool
+	Model               CodingPlanModel
+	Account             Account
+	Token               string
 }
 
 type ModelRouter struct {
@@ -97,9 +99,11 @@ func (r *ModelRouter) Catalog() []ModelView {
 	}
 	result := make([]ModelView, 0, len(aggregates))
 	for upstream, entry := range aggregates {
+		entry.view.ResponsesChatCompat = defaultResponsesChatCompat(upstream)
 		if setting, ok := settings[upstream]; ok {
 			entry.view.Alias = setting.Alias
 			entry.view.Enabled = setting.Enabled
+			entry.view.ResponsesChatCompat = setting.ResponsesChatCompat
 		}
 		entry.view.Accounts = []string{}
 		entry.view.Plans = []string{}
@@ -116,6 +120,10 @@ func (r *ModelRouter) Catalog() []ModelView {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Alias < result[j].Alias })
 	return result
+}
+
+func defaultResponsesChatCompat(upstream string) bool {
+	return strings.EqualFold(strings.TrimSpace(upstream), "GLM-5.2")
 }
 
 func (r *ModelRouter) Resolve(requested string, key APIKey) (ModelRoute, error) {
@@ -182,7 +190,8 @@ func (r *ModelRouter) Resolve(requested string, key APIKey) (ModelRoute, error) 
 	choice := candidates[index]
 	return ModelRoute{
 		Requested: requested, Upstream: selected.Upstream, Alias: selected.Alias,
-		Model: choice.model, Account: choice.account, Token: choice.token,
+		ResponsesChatCompat: selected.ResponsesChatCompat,
+		Model:               choice.model, Account: choice.account, Token: choice.token,
 	}, nil
 }
 

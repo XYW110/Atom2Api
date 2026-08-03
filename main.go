@@ -79,6 +79,7 @@ func main() {
 	adminMux.HandleFunc("DELETE /api/accounts/{id}", api.HandleAccountDelete)
 	adminMux.HandleFunc("POST /api/accounts/{id}/sync", api.HandleAccountSync)
 	adminMux.HandleFunc("POST /api/accounts/{id}/claim", api.HandleAccountClaim)
+	adminMux.HandleFunc("POST /api/accounts/{id}/probe", api.HandleAccountProtocolProbe)
 	adminMux.HandleFunc("GET /api/plan-claims", api.HandlePlanClaimLogs)
 	adminMux.HandleFunc("POST /api/oauth/start", api.HandleOAuthStart)
 	adminMux.HandleFunc("GET /api/oauth/{id}", api.HandleOAuthPoll)

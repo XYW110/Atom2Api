@@ -40,7 +40,7 @@ func TestStoreMigratesLegacyFilesIntoSQLite(t *testing.T) {
 			Enabled: true, CreatedAt: now,
 		}},
 		ModelSettings: map[string]ModelSetting{
-			"legacy-model": {Upstream: "legacy-model", Alias: "legacy-alias", Enabled: true},
+			"legacy-model": {Upstream: "legacy-model", Alias: "legacy-alias", Enabled: true, ResponsesChatCompat: true},
 		},
 		PlanClaimLogs: []PlanClaimLog{{
 			ID: "claim_legacy", AccountID: "acc_legacy", AccountName: "Legacy Account",
@@ -101,7 +101,7 @@ func TestStoreMigratesLegacyFilesIntoSQLite(t *testing.T) {
 	if keys := reloaded.APIKeys(); len(keys) != 1 || keys[0].ID != "key_legacy" {
 		t.Fatalf("migrated API keys = %#v", keys)
 	}
-	if setting := reloaded.ModelSettings()["legacy-model"]; setting.Alias != "legacy-alias" {
+	if setting := reloaded.ModelSettings()["legacy-model"]; setting.Alias != "legacy-alias" || !setting.ResponsesChatCompat {
 		t.Fatalf("migrated model setting = %#v", setting)
 	}
 	if logs := reloaded.PlanClaimLogs("acc_legacy", 10); len(logs) != 1 || logs[0].ID != "claim_legacy" {

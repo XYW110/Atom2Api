@@ -12,7 +12,7 @@ func TestManualModelAppearsInCatalogAndRoutesThroughAvailableAccount(t *testing.
 	_, store := newTestStore(t)
 	account := addTestAccount(t, store, "https://example.com")
 	if err := store.SetModelSetting(ModelSetting{
-		Upstream: "manual-model", Alias: "custom-model", Enabled: true, Manual: true,
+		Upstream: "manual-model", Alias: "custom-model", Enabled: true, Manual: true, ResponsesChatCompat: true,
 	}); err != nil {
 		t.Fatalf("SetModelSetting: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestManualModelAppearsInCatalogAndRoutesThroughAvailableAccount(t *testing.
 			break
 		}
 	}
-	if manual == nil || !manual.Manual || manual.Alias != "custom-model" || manual.AccountCount != 1 {
+	if manual == nil || !manual.Manual || manual.Alias != "custom-model" || manual.AccountCount != 1 || !manual.ResponsesChatCompat {
 		t.Fatalf("manual catalog model = %#v", manual)
 	}
 	if manual.BaseURL != defaultGatewayURL || manual.ProviderType != "openai" {
@@ -37,7 +37,7 @@ func TestManualModelAppearsInCatalogAndRoutesThroughAvailableAccount(t *testing.
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if route.Upstream != "manual-model" || route.Account.ID != account.ID || route.Model.DisplayModelName != "manual-model" || route.Model.BaseURL != defaultGatewayURL {
+	if route.Upstream != "manual-model" || route.Account.ID != account.ID || route.Model.DisplayModelName != "manual-model" || route.Model.BaseURL != defaultGatewayURL || !route.ResponsesChatCompat {
 		t.Fatalf("manual route = %#v", route)
 	}
 }
@@ -61,14 +61,14 @@ func TestManualModelHandlersCreateUpdateAndDelete(t *testing.T) {
 		t.Fatalf("created model arrays must not be nil: %#v", created)
 	}
 
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/models/settings", strings.NewReader(`{"upstream":"manual-model","alias":"renamed-model","enabled":false}`))
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/models/settings", strings.NewReader(`{"upstream":"manual-model","alias":"renamed-model","enabled":false,"responses_chat_compat":true}`))
 	updateResponse := httptest.NewRecorder()
 	api.HandleModelSetting(updateResponse, updateRequest)
 	if updateResponse.Code != http.StatusOK {
 		t.Fatalf("update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
 	}
 	setting := store.ModelSettings()["manual-model"]
-	if !setting.Manual || setting.Alias != "renamed-model" || setting.Enabled {
+	if !setting.Manual || setting.Alias != "renamed-model" || setting.Enabled || !setting.ResponsesChatCompat {
 		t.Fatalf("updated setting = %#v", setting)
 	}
 

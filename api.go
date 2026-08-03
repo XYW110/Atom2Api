@@ -281,7 +281,10 @@ func (a *API) HandleCreateModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	setting := ModelSetting{Upstream: request.Upstream, Alias: request.Alias, Enabled: true, Manual: true}
+	setting := ModelSetting{
+		Upstream: request.Upstream, Alias: request.Alias, Enabled: true, Manual: true,
+		ResponsesChatCompat: defaultResponsesChatCompat(request.Upstream),
+	}
 	if err := a.store.SetModelSetting(setting); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return

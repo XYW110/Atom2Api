@@ -31,11 +31,13 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 - Dashboard: request trends, request counts, input/output tokens, success rate, latency, model distribution, and recent requests
 - Single-binary deployment: embeds the React console in the Go service and also provides Docker and Compose configurations
 
-### Responses API Compatibility Fallback
+### Experimental Responses API Compatibility Conversion
 
-`/v1/responses` first calls the model's native upstream endpoint. If that endpoint returns 404, 405, or 501, Atom2Api retries the same model through `/v1/chat/completions` and converts the request, buffered response, and streaming SSE back to the Responses API. After a successful conversion, the model capability is cached for the lifetime of the process. The response header `X-Atom2api-Responses-Compat: chat-completions` identifies requests served by this fallback.
+Model management provides an experimental "Responses to Chat" switch. When disabled, `/v1/responses` requests are forwarded unchanged to the model's native Responses endpoint. When enabled, Atom2Api calls `/v1/chat/completions` directly and converts the request, buffered response, and streaming SSE back to the Responses API. The switch defaults to enabled for `GLM-5.2` and disabled for other models; models with a verified native Responses channel should keep it disabled. The response header `X-Atom2api-Responses-Compat: chat-completions` identifies requests served by this conversion.
 
 The compatibility layer supports text, image URLs, function tools, JSON Schema, usage, and streaming events. It accepts `prompt_cache_key` but does not forward this cache-routing hint to Chat Completions. Chat Completions cannot provide equivalent server-side state such as `store=true` or `previous_response_id`, or OpenAI built-in tools; those inputs return `400 unsupported_parameter` instead of being silently ignored.
+
+Account management also provides protocol probing for every available model on an account. The probe checks Chat Completions and native Responses separately. It uses normal JSON requests by default and can optionally validate streaming SSE completion events.
 
 ## Local Development
 
@@ -191,7 +193,13 @@ cd frontend && npm run build
 Run the live non-streaming, streaming, and function-tool Responses checks against `GLM-5.2` with the account in the current `config.json`:
 
 ```bash
-ATOM2API_LIVE_GLM=1 go test -run TestManualGLMResponsesFallback -count=1 -v
+ATOM2API_LIVE_GLM=1 go test -run TestManualGLMResponsesChatCompatibility -count=1 -v
+```
+
+Probe the Chat and native Responses protocols for every available model on all configured accounts. Add `ATOM2API_LIVE_PROBE_STREAM=1` to use streaming SSE probes:
+
+```bash
+ATOM2API_LIVE_PROBE=1 go test -run TestManualConfiguredAccountProtocols -count=1 -v
 ```
 
 The test suite covers credential encryption, API key digests, Coding Plan claim fallback and synchronization, signing fixtures, non-streaming and streaming proxy usage, server-side management sessions, and live configuration reloads.

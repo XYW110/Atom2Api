@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Textarea, Tooltip, useDisclosure } from '@heroui/react';
 import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
-import { apiFetch, type Account, type PlanClaimLog, type PlanClaimResult, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
+import { apiFetch, type Account, type AccountProtocolProbeResult, type PlanClaimLog, type PlanClaimResult, type ProtocolProbeResult, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
 
 const statusMeta = {
   active: { label: '运行中', color: 'success' as const },
@@ -110,6 +110,18 @@ function ClaimLogDetails({ log }: { log: PlanClaimLog }) {
   );
 }
 
+function ProtocolProbeStatus({ result }: { result: ProtocolProbeResult }) {
+  const detail = result.error || `HTTP ${result.status || '无响应'}，${result.latency_ms} ms`;
+  return (
+    <Tooltip content={detail}>
+      <div className="min-w-28">
+        <Chip color={result.available ? 'success' : 'danger'} radius="sm" size="sm" variant="flat">{result.available ? '可用' : '不可用'}</Chip>
+        <p className="mt-1 font-mono text-[11px] text-zinc-400">HTTP {result.status || '—'} · {result.latency_ms} ms</p>
+      </div>
+    </Tooltip>
+  );
+}
+
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [query, setQuery] = useState('');
@@ -128,6 +140,10 @@ export default function AccountsPage() {
   const [claimLogs, setClaimLogs] = useState<PlanClaimLog[]>([]);
   const [selectedClaimLog, setSelectedClaimLog] = useState<PlanClaimLog | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [probeAccount, setProbeAccount] = useState<Account | null>(null);
+  const [probeStreaming, setProbeStreaming] = useState(false);
+  const [probeResult, setProbeResult] = useState<AccountProtocolProbeResult | null>(null);
+  const [probeLoading, setProbeLoading] = useState(false);
   const [snapshotAt, setSnapshotAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const oauthErrorNotified = useRef(false);
@@ -136,6 +152,7 @@ export default function AccountsPage() {
   const deleteModal = useDisclosure();
   const editModal = useDisclosure();
   const logsModal = useDisclosure();
+  const probeModal = useDisclosure();
   const { showToast } = useToast();
 
   const load = useCallback(async () => {
@@ -346,6 +363,29 @@ export default function AccountsPage() {
     }
   };
 
+  const openProtocolProbe = (account: Account) => {
+    setProbeAccount(account);
+    setProbeStreaming(false);
+    setProbeResult(null);
+    probeModal.onOpen();
+  };
+
+  const runProtocolProbe = async () => {
+    if (!probeAccount) return;
+    setProbeLoading(true);
+    try {
+      const result = await apiFetch<AccountProtocolProbeResult>(`/api/accounts/${probeAccount.id}/probe`, jsonRequest('POST', { streaming: probeStreaming }));
+      setProbeResult(result);
+      const available = result.results.reduce((count, item) => count + Number(item.chat.available) + Number(item.responses.available), 0);
+      const total = result.results.length * 2;
+      showToast(available === total ? 'success' : 'error', '协议探测完成', `${result.results.length} 个模型，${available}/${total} 个协议渠道可用`);
+    } catch (requestError) {
+      showToast('error', '协议探测失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setProbeLoading(false);
+    }
+  };
+
   const toggleAccount = async (account: Account) => {
     setBusy(`toggle:${account.id}`);
     try {
@@ -410,7 +450,7 @@ export default function AccountsPage() {
                       <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(account.last_sync_at)}</span></TableCell>
                       <TableCell><div className="min-w-28"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${account.plan_claim_schedule.enabled ? 'bg-emerald-500' : 'bg-zinc-300'}`} /><span className="text-xs text-zinc-600">{account.plan_claim_schedule.enabled ? '已启用' : '已停用'}</span></div><code className="mt-1 block whitespace-nowrap font-mono text-[11px] text-zinc-400">{account.plan_claim_schedule.cron}</code></div></TableCell>
                       <TableCell><Tooltip content={account.last_error || status.label}><Chip color={status.color} radius="sm" size="sm" variant="flat">{status.label}</Chip></Tooltip></TableCell>
-                      <TableCell><div className="flex min-w-56 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isDisabled={batchBusy} isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isDisabled={batchBusy} isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isDisabled={batchBusy} isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isDisabled={batchBusy} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
+                      <TableCell><div className="flex min-w-64 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isDisabled={batchBusy} isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="探测 Chat 与 Responses 协议"><Button isIconOnly aria-label="探测模型协议" color="secondary" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => openProtocolProbe(account)}><Activity size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isDisabled={batchBusy} isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isDisabled={batchBusy} isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isDisabled={batchBusy} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
                     </TableRow>
                   );
                 }}
@@ -431,6 +471,10 @@ export default function AccountsPage() {
 
       <Modal isOpen={logsModal.isOpen} radius="sm" scrollBehavior="inside" size="4xl" onOpenChange={logsModal.onOpenChange}>
         <ModalContent>{(onClose) => <><ModalHeader className="flex items-center gap-2">{selectedClaimLog ? <Tooltip content="返回领取记录"><Button isIconOnly aria-label="返回领取记录" radius="sm" size="sm" variant="light" onPress={() => setSelectedClaimLog(null)}><ArrowLeft size={17} /></Button></Tooltip> : null}<span>{selectedClaimLog ? '领取详情' : logAccount ? `“${logAccount.name}”领取记录` : '领取记录'}</span></ModalHeader><ModalBody className="px-0">{selectedClaimLog ? <ClaimLogDetails log={selectedClaimLog} /> : logsLoading ? <div className="space-y-3 px-6 py-2">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}</div> : <Table aria-label="Coding Plan 领取记录" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3 text-sm' }}><TableHeader><TableColumn>触发方式</TableColumn><TableColumn>结果</TableColumn><TableColumn>套餐</TableColumn><TableColumn>开始时间</TableColumn><TableColumn>消息</TableColumn><TableColumn align="end">详情</TableColumn></TableHeader><TableBody items={claimLogs} emptyContent="暂无领取记录">{(claimLog) => <TableRow key={claimLog.id}><TableCell><Chip color={claimLog.trigger === 'scheduled' ? 'primary' : 'default'} radius="sm" size="sm" variant="flat">{claimLog.trigger === 'scheduled' ? '定时' : '手动'}</Chip></TableCell><TableCell><Chip color={claimLog.status === 'success' ? 'success' : claimLog.status === 'failed' ? 'danger' : 'warning'} radius="sm" size="sm" variant="flat">{claimLog.status === 'success' ? '成功' : claimLog.status === 'failed' ? '失败' : '进行中'}</Chip></TableCell><TableCell><span className="whitespace-nowrap text-zinc-700">{claimLog.plan_name || '—'}</span></TableCell><TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(claimLog.started_at)}</span></TableCell><TableCell><p className="max-w-72 truncate text-xs text-zinc-500" title={claimLog.message}>{claimLog.message || '—'}</p></TableCell><TableCell><Tooltip content="查看领取详情"><Button isIconOnly aria-label="查看领取详情" radius="sm" size="sm" variant="light" onPress={() => setSelectedClaimLog(claimLog)}><Eye size={16} /></Button></Tooltip></TableCell></TableRow>}</TableBody></Table>}</ModalBody><ModalFooter>{selectedClaimLog ? <Button radius="sm" variant="light" onPress={() => setSelectedClaimLog(null)}>返回</Button> : null}<Button radius="sm" variant="light" onPress={onClose}>关闭</Button></ModalFooter></>}</ModalContent>
+      </Modal>
+
+      <Modal isOpen={probeModal.isOpen} radius="sm" scrollBehavior="inside" size="4xl" onOpenChange={probeModal.onOpenChange}>
+        <ModalContent>{(onClose) => <><ModalHeader>{probeAccount ? `“${probeAccount.name}”协议探测` : '协议探测'}</ModalHeader><ModalBody className="gap-5"><div className="flex items-center justify-between gap-4 rounded-md border border-zinc-200 px-4 py-3"><div><p className="text-sm font-medium text-zinc-800">流式传输测试</p><p className="mt-1 text-xs text-zinc-400">默认关闭；开启后分别验证 Chat 与 Responses 的 SSE 完成事件。</p></div><Switch aria-label="流式传输测试" isDisabled={probeLoading} isSelected={probeStreaming} size="sm" onValueChange={(streaming) => { setProbeStreaming(streaming); setProbeResult(null); }} /></div>{probeLoading ? <div className="space-y-3">{Array.from({ length: Math.max(probeAccount?.models.length || 1, 2) }).map((_, index) => <Skeleton key={index} className="h-16 w-full rounded-md" />)}</div> : probeResult ? <div className="overflow-hidden rounded-md border border-zinc-200"><Table aria-label="模型协议探测结果" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-3 text-sm align-top' }}><TableHeader><TableColumn>模型</TableColumn><TableColumn>Chat Completions</TableColumn><TableColumn>原生 Responses</TableColumn></TableHeader><TableBody items={probeResult.results} emptyContent="没有可探测的模型">{(item) => <TableRow key={item.model}><TableCell><code className="font-mono text-xs font-semibold text-zinc-800">{item.model}</code></TableCell><TableCell><ProtocolProbeStatus result={item.chat} /></TableCell><TableCell><ProtocolProbeStatus result={item.responses} /></TableCell></TableRow>}</TableBody></Table></div> : <div className="rounded-md border border-dashed border-zinc-300 px-6 py-10 text-center"><Activity className="mx-auto text-zinc-300" size={28} /><p className="mt-3 text-sm font-medium text-zinc-700">准备探测账号的全部可用模型</p><p className="mt-1 text-xs text-zinc-400">每个模型会分别发送一次 Chat 和原生 Responses 请求。</p></div>}</ModalBody><ModalFooter><Button isDisabled={probeLoading} radius="sm" variant="light" onPress={onClose}>关闭</Button><Button color="primary" isLoading={probeLoading} radius="sm" startContent={probeLoading ? null : <Activity size={16} />} onPress={() => void runProtocolProbe()}>{probeResult ? '重新探测' : '开始探测'}</Button></ModalFooter></>}</ModalContent>
       </Modal>
 
       <Modal isOpen={deleteModal.isOpen} radius="sm" size="sm" onOpenChange={deleteModal.onOpenChange}>

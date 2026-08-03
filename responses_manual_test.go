@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestManualGLMResponsesFallback(t *testing.T) {
+func TestManualGLMResponsesChatCompatibility(t *testing.T) {
 	if os.Getenv("ATOM2API_LIVE_GLM") != "1" {
 		t.Skip("set ATOM2API_LIVE_GLM=1 to run against the configured AtomGit account")
 	}
@@ -29,8 +29,12 @@ func TestManualGLMResponsesFallback(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	router := NewModelRouter(store)
-	if _, err := router.Resolve("GLM-5.2", APIKey{}); err != nil {
+	route, err := router.Resolve("GLM-5.2", APIKey{})
+	if err != nil {
 		t.Fatalf("GLM-5.2 is not routable: %v", err)
+	}
+	if !route.ResponsesChatCompat {
+		t.Fatal("enable Responses-to-Chat compatibility for GLM-5.2 in model settings before running this test")
 	}
 	codingPlan := NewCodingPlanClient(config, store)
 	oauth := NewOAuthManager(config, store, codingPlan)

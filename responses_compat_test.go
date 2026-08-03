@@ -5,22 +5,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 )
 
-func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
-	var mu sync.Mutex
+func TestResponsesUsesConfiguredChatCompatibility(t *testing.T) {
 	responsesRequests := 0
 	chatRequests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
 		switch r.URL.Path {
 		case "/v1/responses":
 			responsesRequests++
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":{"message":"Not Found"}}`))
+			t.Errorf("configured compatibility unexpectedly called native Responses endpoint")
+			w.WriteHeader(http.StatusInternalServerError)
 		case "/v1/chat/completions":
 			chatRequests++
 			var request map[string]any
@@ -40,6 +36,11 @@ func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
 			tools, _ := request["tools"].([]any)
 			if len(tools) != 1 || tools[0].(map[string]any)["type"] != "function" {
 				t.Errorf("Chat tools = %#v", tools)
+			} else {
+				function, _ := tools[0].(map[string]any)["function"].(map[string]any)
+				if function["name"] != "weather" || function["strict"] != true {
+					t.Errorf("Chat function tool = %#v", function)
+				}
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"chatcmpl-fallback","object":"chat.completion","created":123,"model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":"hello back"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":2}}}`))
@@ -51,7 +52,9 @@ func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
 
 	config, store := newTestStore(t)
 	addTestAccount(t, store, upstream.URL)
-	if err := store.SetModelSetting(ModelSetting{Upstream: "upstream-model", Alias: "gpt-responses", Enabled: true}); err != nil {
+	if err := store.SetModelSetting(ModelSetting{
+		Upstream: "upstream-model", Alias: "gpt-responses", Enabled: true, ResponsesChatCompat: true,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	router := NewModelRouter(store)
@@ -88,7 +91,7 @@ func TestResponsesFallsBackToChatAndCachesModelCapability(t *testing.T) {
 			t.Fatalf("Responses usage = %#v", usage)
 		}
 	}
-	if responsesRequests != 1 || chatRequests != 2 {
+	if responsesRequests != 0 || chatRequests != 2 {
 		t.Fatalf("upstream request counts: responses=%d chat=%d", responsesRequests, chatRequests)
 	}
 	records := store.UsageRecords()
@@ -131,7 +134,32 @@ func TestResponsesKeepsNativeUpstreamWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestResponsesStreamingFallbackRebuildsTextAndToolEvents(t *testing.T) {
+func TestResponsesDoesNotAutoFallbackWithoutModelSetting(t *testing.T) {
+	chatRequests := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			chatRequests++
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"Not Found"}}`))
+	}))
+	defer upstream.Close()
+
+	config, store := newTestStore(t)
+	addTestAccount(t, store, upstream.URL)
+	proxy := NewProxy(config, store, NewModelRouter(store), nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"upstream-model","input":"hello"}`))
+	response := httptest.NewRecorder()
+	proxy.HandleRequest(response, request, APIKey{})
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if chatRequests != 0 || response.Header().Get(responsesFallbackHeader) != "" {
+		t.Fatalf("request without compatibility setting used Chat endpoint")
+	}
+}
+
+func TestResponsesConfiguredCompatibilityRebuildsStreamingEvents(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/responses" {
 			w.WriteHeader(http.StatusNotFound)
@@ -164,6 +192,11 @@ func TestResponsesStreamingFallbackRebuildsTextAndToolEvents(t *testing.T) {
 
 	config, store := newTestStore(t)
 	addTestAccount(t, store, upstream.URL)
+	if err := store.SetModelSetting(ModelSetting{
+		Upstream: "upstream-model", Alias: "upstream-model", Enabled: true, ResponsesChatCompat: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	router := NewModelRouter(store)
 	proxy := NewProxy(config, store, router, nil)
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"upstream-model","input":"hello","stream":true,"store":false}`))
@@ -188,7 +221,7 @@ func TestResponsesStreamingFallbackRebuildsTextAndToolEvents(t *testing.T) {
 	}
 }
 
-func TestResponsesFallbackRejectsUnsupportedBuiltInTools(t *testing.T) {
+func TestResponsesConfiguredCompatibilityRejectsUnsupportedBuiltInTools(t *testing.T) {
 	chatRequests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/responses" {
@@ -202,6 +235,11 @@ func TestResponsesFallbackRejectsUnsupportedBuiltInTools(t *testing.T) {
 
 	config, store := newTestStore(t)
 	addTestAccount(t, store, upstream.URL)
+	if err := store.SetModelSetting(ModelSetting{
+		Upstream: "upstream-model", Alias: "upstream-model", Enabled: true, ResponsesChatCompat: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	proxy := NewProxy(config, store, NewModelRouter(store), nil)
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"upstream-model","input":"hello","tools":[{"type":"web_search_preview"}]}`))
 	response := httptest.NewRecorder()

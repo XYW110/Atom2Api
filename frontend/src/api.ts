@@ -161,6 +161,25 @@ export interface ModelRecord {
   accounts: string[];
   plans: string[];
   manual: boolean;
+  responses_chat_compat: boolean;
+}
+
+export interface ProtocolProbeResult {
+  available: boolean;
+  status: number;
+  latency_ms: number;
+  error?: string;
+}
+
+export interface AccountProtocolProbeResult {
+  account_id: string;
+  account_name: string;
+  streaming: boolean;
+  results: Array<{
+    model: string;
+    chat: ProtocolProbeResult;
+    responses: ProtocolProbeResult;
+  }>;
 }
 
 export interface DashboardSummary {

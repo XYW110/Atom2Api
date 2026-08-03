@@ -31,11 +31,13 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 - 仪表盘：请求趋势、请求数、输入/输出 tokens、成功率、延迟、模型分布和最近请求
 - 单二进制部署：React 控制台嵌入 Go 服务，另附 Docker/Compose
 
-### Responses API 兼容回退
+### Responses API 实验性兼容转换
 
-`/v1/responses` 默认先请求模型的原生上游。若上游返回 404、405 或 501，Atom2Api 会使用同一模型改调 `/v1/chat/completions`，并将请求、普通响应和流式 SSE 转换回 Responses API；转换成功后会在当前进程内记住该模型的能力。响应头 `X-Atom2api-Responses-Compat: chat-completions` 表示本次请求使用了兼容回退。
+模型管理提供“Responses 转 Chat”实验性开关。开关关闭时，`/v1/responses` 请求会原样发送到模型的原生 Responses 上游；开关开启时，Atom2Api 会直接改调 `/v1/chat/completions`，并将请求、普通响应和流式 SSE 转换回 Responses API。`GLM-5.2` 默认开启该开关，其它模型默认关闭；确认原生 Responses 渠道可用的模型应保持关闭。响应头 `X-Atom2api-Responses-Compat: chat-completions` 表示本次请求使用了兼容转换。
 
 兼容层支持文本、图片 URL、函数工具、JSON Schema、用量和流式事件。兼容层会接受 `prompt_cache_key`，但不会把这一缓存路由提示转发给 Chat Completions。Chat Completions 无法等价提供的服务端状态（例如 `store=true`、`previous_response_id`）和 OpenAI 内置工具会返回 `400 unsupported_parameter`，不会被静默忽略。
+
+账号管理中的协议探测会对该账号的全部可用模型分别测试 Chat Completions 与原生 Responses。探测面板默认执行普通 JSON 请求，也可以开启流式传输测试以验证 SSE 完成事件。
 
 ## 本地运行
 
@@ -191,7 +193,13 @@ cd frontend && npm run build
 使用当前 `config.json` 中的账号对 `GLM-5.2` 执行 Responses 非流式、流式和函数工具实测：
 
 ```bash
-ATOM2API_LIVE_GLM=1 go test -run TestManualGLMResponsesFallback -count=1 -v
+ATOM2API_LIVE_GLM=1 go test -run TestManualGLMResponsesChatCompatibility -count=1 -v
+```
+
+对当前配置中所有账号的可用模型执行 Chat 与原生 Responses 协议探测；追加 `ATOM2API_LIVE_PROBE_STREAM=1` 可改为流式 SSE 探测：
+
+```bash
+ATOM2API_LIVE_PROBE=1 go test -run TestManualConfiguredAccountProtocols -count=1 -v
 ```
 
 测试覆盖凭据加密、API Key 摘要、Coding Plan 领取级联与同步、签名 fixture、非流式/流式代理用量、服务端管理会话和配置热加载。
