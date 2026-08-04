@@ -126,6 +126,8 @@ curl http://localhost:8080/v1/chat/completions \
 | `gateway_url` | `https://llm-api.atomgit.com/v1` | 默认 LLM 网关 |
 | `signer_url` | 空 | 可选外部签名服务；为空时使用内置 signer |
 | `audit_debug_enabled` | `false` | 开启后记录完整请求/响应正文及脱敏 Header |
+| `audit_retention_days` | `30` | 手动清理完整请求审计记录时默认使用的保留天数 |
+| `audit_detail_retention_days` | `30` | 手动清理请求/响应正文、Header、错误和重试详情时默认使用的保留天数 |
 | `request_timeout_seconds` | `120` | 上游请求超时范围 5-600 秒 |
 | `request_retry_count` | `0` | 命中指定上游 HTTP 状态码后的重试次数，范围 0-10；0 表示不重试 |
 | `request_retry_status_codes` | 空 | 逗号分隔的状态码或范围，例如 `400-500,503,429`；重叠和相邻项会自动归并 |

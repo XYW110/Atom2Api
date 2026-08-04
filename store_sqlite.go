@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -18,6 +19,7 @@ const (
 	sqliteSchemaVersion = 1
 	maxUsageRecords     = 50000
 	legacyMigrationKey  = "legacy_files_migrated_v1"
+	sqliteTimestamp     = "2006-01-02T15:04:05.999999999Z07:00"
 )
 
 var sqliteSchema = []string{
@@ -396,8 +398,98 @@ func insertJSON(tx *sql.Tx, query string, args ...any) error {
 func insertUsageTx(tx *sql.Tx, record UsageRecord) error {
 	return insertJSON(tx,
 		`INSERT INTO atom2api_usage_records(id, timestamp, data) VALUES (?, ?, ?)`,
-		record.ID, record.Timestamp.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"), record,
+		record.ID, record.Timestamp.UTC().Format(sqliteTimestamp), record,
 	)
+}
+
+func (s *Store) DeleteUsageRecordsBefore(cutoff time.Time) (int, error) {
+	cutoff = cutoff.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	kept := make([]UsageRecord, 0, len(s.state.Usage))
+	deleted := 0
+	for _, record := range s.state.Usage {
+		if record.Timestamp.Before(cutoff) {
+			deleted++
+			continue
+		}
+		kept = append(kept, record)
+	}
+	if deleted == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin usage record cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM atom2api_usage_records WHERE timestamp < ?`, cutoff.Format(sqliteTimestamp)); err != nil {
+		return 0, fmt.Errorf("delete usage records: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit usage record cleanup: %w", err)
+	}
+	s.state.Usage = kept
+	return deleted, nil
+}
+
+func (s *Store) ClearUsageDetailsBefore(cutoff time.Time) (int, error) {
+	cutoff = cutoff.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	updated := append([]UsageRecord(nil), s.state.Usage...)
+	changed := make([]UsageRecord, 0)
+	for index := range updated {
+		record := &updated[index]
+		if !record.Timestamp.Before(cutoff) || !usageRecordHasDetails(*record) {
+			continue
+		}
+		clearUsageRecordDetails(record)
+		changed = append(changed, *record)
+	}
+	if len(changed) == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin usage detail cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	for _, record := range changed {
+		data, err := json.Marshal(record)
+		if err != nil {
+			return 0, fmt.Errorf("encode usage record %s: %w", record.ID, err)
+		}
+		if _, err := tx.Exec(
+			`UPDATE atom2api_usage_records SET data = ? WHERE id = ? AND timestamp = ?`,
+			data, record.ID, record.Timestamp.UTC().Format(sqliteTimestamp),
+		); err != nil {
+			return 0, fmt.Errorf("clear usage record %s details: %w", record.ID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit usage detail cleanup: %w", err)
+	}
+	s.state.Usage = updated
+	return len(changed), nil
+}
+
+func usageRecordHasDetails(record UsageRecord) bool {
+	return record.Error != "" || record.RequestBody != "" || record.ResponseBody != "" ||
+		len(record.RequestHeaders) > 0 || len(record.ResponseHeaders) > 0 || len(record.Attempts) > 0
+}
+
+func clearUsageRecordDetails(record *UsageRecord) {
+	record.Error = ""
+	record.RequestBody = ""
+	record.ResponseBody = ""
+	record.RequestHeaders = nil
+	record.ResponseHeaders = nil
+	record.Attempts = nil
 }
 
 func (s *Store) saveUsageLocked(record UsageRecord, compact bool) error {

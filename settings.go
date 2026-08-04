@@ -10,34 +10,38 @@ import (
 )
 
 type settingsResponse struct {
-	UserAgent          string    `json:"user_agent"`
-	ListenAddress      string    `json:"listen_address"`
-	DataPath           string    `json:"data_path"`
-	PlatformBaseURL    string    `json:"platform_base_url"`
-	CodingPlanAPIURL   string    `json:"codingplan_api_url"`
-	GatewayURL         string    `json:"gateway_url"`
-	SignerURL          string    `json:"signer_url"`
-	SignerConfigured   bool      `json:"signer_configured"`
-	AuditDebugEnabled  bool      `json:"audit_debug_enabled"`
-	RequestTimeoutSecs int       `json:"request_timeout_seconds"`
-	RequestRetryCount  int       `json:"request_retry_count"`
-	RetryStatusCodes   string    `json:"request_retry_status_codes"`
-	DefaultPassword    bool      `json:"default_password"`
-	LoadedAt           time.Time `json:"loaded_at"`
+	UserAgent                string    `json:"user_agent"`
+	ListenAddress            string    `json:"listen_address"`
+	DataPath                 string    `json:"data_path"`
+	PlatformBaseURL          string    `json:"platform_base_url"`
+	CodingPlanAPIURL         string    `json:"codingplan_api_url"`
+	GatewayURL               string    `json:"gateway_url"`
+	SignerURL                string    `json:"signer_url"`
+	SignerConfigured         bool      `json:"signer_configured"`
+	AuditDebugEnabled        bool      `json:"audit_debug_enabled"`
+	RequestTimeoutSecs       int       `json:"request_timeout_seconds"`
+	RequestRetryCount        int       `json:"request_retry_count"`
+	RetryStatusCodes         string    `json:"request_retry_status_codes"`
+	AuditRetentionDays       int       `json:"audit_retention_days"`
+	AuditDetailRetentionDays int       `json:"audit_detail_retention_days"`
+	DefaultPassword          bool      `json:"default_password"`
+	LoadedAt                 time.Time `json:"loaded_at"`
 }
 
 type updateSettingsRequest struct {
-	UserAgent          *string `json:"user_agent"`
-	PlatformBaseURL    *string `json:"platform_base_url"`
-	CodingPlanAPIURL   *string `json:"codingplan_api_url"`
-	GatewayURL         *string `json:"gateway_url"`
-	SignerURL          *string `json:"signer_url"`
-	SignerToken        *string `json:"signer_token"`
-	AdminPassword      *string `json:"admin_password"`
-	AuditDebugEnabled  *bool   `json:"audit_debug_enabled"`
-	RequestTimeoutSecs *int    `json:"request_timeout_seconds"`
-	RequestRetryCount  *int    `json:"request_retry_count"`
-	RetryStatusCodes   *string `json:"request_retry_status_codes"`
+	UserAgent                *string `json:"user_agent"`
+	PlatformBaseURL          *string `json:"platform_base_url"`
+	CodingPlanAPIURL         *string `json:"codingplan_api_url"`
+	GatewayURL               *string `json:"gateway_url"`
+	SignerURL                *string `json:"signer_url"`
+	SignerToken              *string `json:"signer_token"`
+	AdminPassword            *string `json:"admin_password"`
+	AuditDebugEnabled        *bool   `json:"audit_debug_enabled"`
+	RequestTimeoutSecs       *int    `json:"request_timeout_seconds"`
+	RequestRetryCount        *int    `json:"request_retry_count"`
+	RetryStatusCodes         *string `json:"request_retry_status_codes"`
+	AuditRetentionDays       *int    `json:"audit_retention_days"`
+	AuditDetailRetentionDays *int    `json:"audit_detail_retention_days"`
 }
 
 type errorResponse struct {
@@ -100,6 +104,12 @@ func handleUpdateSettings(config *ConfigManager) http.HandlerFunc {
 		if request.RetryStatusCodes != nil {
 			updated.RetryStatusCodes = *request.RetryStatusCodes
 		}
+		if request.AuditRetentionDays != nil {
+			updated.AuditRetentionDays = *request.AuditRetentionDays
+		}
+		if request.AuditDetailRetentionDays != nil {
+			updated.AuditDetailRetentionDays = *request.AuditDetailRetentionDays
+		}
 		if err := config.Update(updated); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -129,6 +139,7 @@ func writeSettingsResponse(w http.ResponseWriter, status int, snapshot ConfigSna
 		SignerConfigured: true, AuditDebugEnabled: snapshot.AuditDebugEnabled,
 		RequestTimeoutSecs: snapshot.RequestTimeoutSecs,
 		RequestRetryCount:  snapshot.RequestRetryCount, RetryStatusCodes: snapshot.RetryStatusCodes,
+		AuditRetentionDays: snapshot.AuditRetentionDays, AuditDetailRetentionDays: snapshot.AuditDetailRetentionDays,
 		DefaultPassword: defaultAdminPasswordActive(snapshot.AdminPassword), LoadedAt: snapshot.LoadedAt,
 	})
 }

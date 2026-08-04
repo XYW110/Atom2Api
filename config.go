@@ -28,23 +28,27 @@ const (
 	defaultPlatformBaseURL  = "https://acs.atomgit.com"
 	defaultCodingPlanAPIURL = "https://api.gitcode.com/api/v5"
 	defaultGatewayURL       = "https://llm-api.atomgit.com/v1"
+	defaultAuditRetention   = 30
+	maxAuditRetention       = 36500
 )
 
 type Config struct {
-	UserAgent          string `json:"user_agent"`
-	ListenAddress      string `json:"listen_address"`
-	DataPath           string `json:"data_path"`
-	AdminPassword      string `json:"admin_password"`
-	EncryptionKey      string `json:"encryption_key"`
-	PlatformBaseURL    string `json:"platform_base_url"`
-	CodingPlanAPIURL   string `json:"codingplan_api_url"`
-	GatewayURL         string `json:"gateway_url"`
-	SignerURL          string `json:"signer_url,omitempty"`
-	SignerToken        string `json:"signer_token,omitempty"`
-	AuditDebugEnabled  bool   `json:"audit_debug_enabled"`
-	RequestTimeoutSecs int    `json:"request_timeout_seconds"`
-	RequestRetryCount  int    `json:"request_retry_count"`
-	RetryStatusCodes   string `json:"request_retry_status_codes"`
+	UserAgent                string `json:"user_agent"`
+	ListenAddress            string `json:"listen_address"`
+	DataPath                 string `json:"data_path"`
+	AdminPassword            string `json:"admin_password"`
+	EncryptionKey            string `json:"encryption_key"`
+	PlatformBaseURL          string `json:"platform_base_url"`
+	CodingPlanAPIURL         string `json:"codingplan_api_url"`
+	GatewayURL               string `json:"gateway_url"`
+	SignerURL                string `json:"signer_url,omitempty"`
+	SignerToken              string `json:"signer_token,omitempty"`
+	AuditDebugEnabled        bool   `json:"audit_debug_enabled"`
+	RequestTimeoutSecs       int    `json:"request_timeout_seconds"`
+	RequestRetryCount        int    `json:"request_retry_count"`
+	RetryStatusCodes         string `json:"request_retry_status_codes"`
+	AuditRetentionDays       int    `json:"audit_retention_days"`
+	AuditDetailRetentionDays int    `json:"audit_detail_retention_days"`
 }
 
 type retryStatusCodeSet [600]bool
@@ -217,6 +221,14 @@ func normalizeConfig(config *Config) (bool, error) {
 	changed = changed || passwordChanged
 	if config.RequestTimeoutSecs == 0 {
 		config.RequestTimeoutSecs = 120
+		changed = true
+	}
+	if config.AuditRetentionDays == 0 {
+		config.AuditRetentionDays = defaultAuditRetention
+		changed = true
+	}
+	if config.AuditDetailRetentionDays == 0 {
+		config.AuditDetailRetentionDays = defaultAuditRetention
 		changed = true
 	}
 	retryStatuses, err := parseRetryStatusCodes(config.RetryStatusCodes)
@@ -429,6 +441,12 @@ func validateConfig(config Config) error {
 	}
 	if config.RequestRetryCount > 0 && retryStatuses.String() == "" {
 		return errors.New("request_retry_status_codes must not be empty when request retries are enabled")
+	}
+	if config.AuditRetentionDays < 1 || config.AuditRetentionDays > maxAuditRetention {
+		return fmt.Errorf("audit_retention_days must be between 1 and %d", maxAuditRetention)
+	}
+	if config.AuditDetailRetentionDays < 1 || config.AuditDetailRetentionDays > maxAuditRetention {
+		return fmt.Errorf("audit_detail_retention_days must be between 1 and %d", maxAuditRetention)
 	}
 	if _, err := encryptionKey(config.EncryptionKey); err != nil {
 		return err

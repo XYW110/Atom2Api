@@ -7,6 +7,8 @@
   "codingplan_api_url": "https://api.gitcode.com/api/v5",
   "gateway_url": "https://llm-api.atomgit.com/v1",
   "audit_debug_enabled": false,
+  "audit_retention_days": 30,
+  "audit_detail_retention_days": 30,
   "request_timeout_seconds": 120,
   "request_retry_count": 0,
   "request_retry_status_codes": ""

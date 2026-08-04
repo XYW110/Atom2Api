@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"sort"
@@ -423,6 +424,15 @@ type auditDetailResponse struct {
 	KeyName     string `json:"key_name"`
 }
 
+type auditCleanupRequest struct {
+	Days int `json:"days"`
+}
+
+type auditCleanupResponse struct {
+	Affected int       `json:"affected"`
+	Cutoff   time.Time `json:"cutoff"`
+}
+
 func auditItem(record UsageRecord, accountName, keyName string) auditListItem {
 	method := record.Method
 	if method == "" {
@@ -531,6 +541,40 @@ func (a *API) HandleAuditDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusNotFound, errorResponse{Error: "audit request not found"})
+}
+
+func (a *API) HandleAuditRecordCleanup(w http.ResponseWriter, r *http.Request) {
+	a.handleAuditCleanup(w, r, false)
+}
+
+func (a *API) HandleAuditDetailCleanup(w http.ResponseWriter, r *http.Request) {
+	a.handleAuditCleanup(w, r, true)
+}
+
+func (a *API) handleAuditCleanup(w http.ResponseWriter, r *http.Request, detailsOnly bool) {
+	var request auditCleanupRequest
+	if !decodeJSONBody(w, r, &request, 1<<10) {
+		return
+	}
+	if request.Days < 1 || request.Days > maxAuditRetention {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("days must be between 1 and %d", maxAuditRetention)})
+		return
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -request.Days)
+	var (
+		affected int
+		err      error
+	)
+	if detailsOnly {
+		affected, err = a.store.ClearUsageDetailsBefore(cutoff)
+	} else {
+		affected, err = a.store.DeleteUsageRecordsBefore(cutoff)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, auditCleanupResponse{Affected: affected, Cutoff: cutoff})
 }
 
 func (a *API) HandleDashboard(w http.ResponseWriter, r *http.Request) {

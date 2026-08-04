@@ -20,6 +20,9 @@ func TestConfigManagerCreatesDefaultConfig(t *testing.T) {
 	if got := manager.Snapshot().UserAgent; got != defaultUserAgent {
 		t.Fatalf("default UserAgent = %q, want %q", got, defaultUserAgent)
 	}
+	if snapshot := manager.Snapshot(); snapshot.AuditRetentionDays != 30 || snapshot.AuditDetailRetentionDays != 30 {
+		t.Fatalf("default audit retention = (%d, %d), want (30, 30)", snapshot.AuditRetentionDays, snapshot.AuditDetailRetentionDays)
+	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -229,5 +232,21 @@ func TestRequestRetryConfigValidation(t *testing.T) {
 	config.RetryStatusCodes = "99,600,503-500"
 	if _, err := normalizeConfig(&config); err == nil {
 		t.Fatal("normalizeConfig accepted invalid status codes")
+	}
+}
+
+func TestAuditRetentionConfigValidation(t *testing.T) {
+	config, err := defaultConfig()
+	if err != nil {
+		t.Fatalf("defaultConfig: %v", err)
+	}
+	config.AuditRetentionDays = -1
+	if err := validateConfig(config); err == nil {
+		t.Fatal("validateConfig accepted a negative audit retention")
+	}
+	config.AuditRetentionDays = defaultAuditRetention
+	config.AuditDetailRetentionDays = maxAuditRetention + 1
+	if err := validateConfig(config); err == nil {
+		t.Fatal("validateConfig accepted an excessive audit detail retention")
 	}
 }

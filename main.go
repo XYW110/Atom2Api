@@ -74,6 +74,8 @@ func main() {
 	adminMux.HandleFunc("GET /api/dashboard", api.HandleDashboard)
 	adminMux.HandleFunc("GET /api/audit", api.HandleAudits)
 	adminMux.HandleFunc("GET /api/audit/{id}", api.HandleAuditDetail)
+	adminMux.HandleFunc("POST /api/audit/cleanup/records", api.HandleAuditRecordCleanup)
+	adminMux.HandleFunc("POST /api/audit/cleanup/details", api.HandleAuditDetailCleanup)
 	adminMux.HandleFunc("GET /api/accounts", api.HandleAccounts)
 	adminMux.HandleFunc("PATCH /api/accounts/{id}", api.HandleAccountUpdate)
 	adminMux.HandleFunc("DELETE /api/accounts/{id}", api.HandleAccountDelete)

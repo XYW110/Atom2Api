@@ -126,6 +126,8 @@ curl http://localhost:8080/v1/chat/completions \
 | `gateway_url` | `https://llm-api.atomgit.com/v1` | Default LLM gateway |
 | `signer_url` | Empty | Optional external signing service; the built-in signer is used when empty |
 | `audit_debug_enabled` | `false` | Records full request/response bodies and sanitized headers when enabled |
+| `audit_retention_days` | `30` | Default retention period used when manually deleting complete audit records |
+| `audit_detail_retention_days` | `30` | Default retention period used when manually clearing audit bodies, headers, errors, and retry details |
 | `request_timeout_seconds` | `120` | Upstream request timeout, from 5 to 600 seconds |
 | `request_retry_count` | `0` | Number of retries for matching upstream HTTP statuses, from 0 to 10; 0 disables retries |
 | `request_retry_status_codes` | Empty | Comma-separated statuses and ranges, such as `400-500,503,429`; overlapping and adjacent values are merged automatically |

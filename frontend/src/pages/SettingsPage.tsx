@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AlertCircle, ArrowUpCircle, Bug, Check, ExternalLink, Github, KeyRound, Network, RefreshCw, Save, Settings2, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ArrowUpCircle, Bug, Check, ExternalLink, Github, KeyRound, Network, RefreshCw, Save, Settings2, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Switch, Tooltip, useDisclosure } from '@heroui/react';
 import { PageShell, StatusDot } from '../components/PageShell';
 import { useToast } from '../components/Toast';
-import { apiFetch, type SettingsResponse, type UserAgentCheckResponse, type VersionInfo, errorMessage, formatDateTime, jsonRequest } from '../api';
+import { apiFetch, type AuditCleanupResponse, type SettingsResponse, type UserAgentCheckResponse, type VersionInfo, errorMessage, formatDateTime, jsonRequest } from '../api';
 
-type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds' | 'request_retry_count' | 'request_retry_status_codes'>;
+type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds' | 'request_retry_count' | 'request_retry_status_codes' | 'audit_retention_days' | 'audit_detail_retention_days'>;
 type ProjectVersionInfo = VersionInfo & { repository_url: string };
+type AuditCleanupTarget = 'records' | 'details';
 
 const emptyForm: SettingsForm = {
-  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120, request_retry_count: 0, request_retry_status_codes: '',
+  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120, request_retry_count: 0, request_retry_status_codes: '', audit_retention_days: 30, audit_detail_retention_days: 30,
 };
 
 function settingsForm(response: SettingsResponse): SettingsForm {
@@ -23,14 +24,21 @@ function settingsForm(response: SettingsResponse): SettingsForm {
     request_timeout_seconds: response.request_timeout_seconds,
     request_retry_count: response.request_retry_count,
     request_retry_status_codes: response.request_retry_status_codes,
+    audit_retention_days: response.audit_retention_days,
+    audit_detail_retention_days: response.audit_detail_retention_days,
   };
 }
 
 const defaultRepositoryURL = 'https://github.com/cnluminous/Atom2Api';
+const maxAuditRetentionDays = 36500;
 
 function displayVersion(value?: string) {
   if (!value) return '—';
   return value === 'dev' || value.startsWith('v') ? value : `v${value}`;
+}
+
+function validAuditRetentionDays(value: number) {
+  return Number.isInteger(value) && value >= 1 && value <= maxAuditRetentionDays;
 }
 
 export default function SettingsPage() {
@@ -49,7 +57,10 @@ export default function SettingsPage() {
   const [versionRequestError, setVersionRequestError] = useState('');
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [cleanupTarget, setCleanupTarget] = useState<AuditCleanupTarget | null>(null);
+  const [cleaningAudit, setCleaningAudit] = useState(false);
   const userAgentConfirmation = useDisclosure();
+  const cleanupConfirmation = useDisclosure();
   const { showToast } = useToast();
 
   const load = useCallback(async () => {
@@ -105,6 +116,12 @@ export default function SettingsPage() {
     if (form.request_retry_count > 0 && !form.request_retry_status_codes.trim()) {
       setError('启用请求重试时必须填写重试状态码');
       showToast('error', '保存设置失败', '启用请求重试时必须填写重试状态码');
+      return;
+    }
+    if (!validAuditRetentionDays(form.audit_retention_days) || !validAuditRetentionDays(form.audit_detail_retention_days)) {
+      const message = `审计日志保留天数必须是 1-${maxAuditRetentionDays} 之间的整数`;
+      setError(message);
+      showToast('error', '保存设置失败', message);
       return;
     }
     setSaving(true);
@@ -163,6 +180,39 @@ export default function SettingsPage() {
     }
   };
 
+  const requestAuditCleanup = (target: AuditCleanupTarget) => {
+    const days = target === 'records' ? form.audit_retention_days : form.audit_detail_retention_days;
+    if (!validAuditRetentionDays(days)) {
+      showToast('error', '无法清理日志', `保留天数必须是 1-${maxAuditRetentionDays} 之间的整数`);
+      return;
+    }
+    setCleanupTarget(target);
+    cleanupConfirmation.onOpen();
+  };
+
+  const cleanAuditLogs = async () => {
+    if (!cleanupTarget) return;
+    const days = cleanupTarget === 'records' ? form.audit_retention_days : form.audit_detail_retention_days;
+    setCleaningAudit(true);
+    try {
+      const endpoint = cleanupTarget === 'records' ? '/api/audit/cleanup/records' : '/api/audit/cleanup/details';
+      const result = await apiFetch<AuditCleanupResponse>(endpoint, jsonRequest('POST', { days }));
+      cleanupConfirmation.onClose();
+      showToast(
+        'success',
+        cleanupTarget === 'records' ? '审计记录清理完成' : '详细日志清理完成',
+        cleanupTarget === 'records'
+          ? `已删除 ${result.affected.toLocaleString()} 条 ${days} 天前的审计记录`
+          : `已清除 ${result.affected.toLocaleString()} 条 ${days} 天前记录的详细内容`,
+      );
+      setCleanupTarget(null);
+    } catch (requestError) {
+      showToast('error', '日志清理失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setCleaningAudit(false);
+    }
+  };
+
   const checkApplicationVersion = async () => {
     setCheckingVersion(true);
     setVersionRequestError('');
@@ -192,7 +242,8 @@ export default function SettingsPage() {
     form.codingplan_api_url !== settings?.codingplan_api_url || form.gateway_url !== settings?.gateway_url ||
     form.signer_url !== settings?.signer_url || form.audit_debug_enabled !== settings?.audit_debug_enabled ||
     form.request_timeout_seconds !== settings?.request_timeout_seconds || form.request_retry_count !== settings?.request_retry_count ||
-    form.request_retry_status_codes !== settings?.request_retry_status_codes ||
+    form.request_retry_status_codes !== settings?.request_retry_status_codes || form.audit_retention_days !== settings?.audit_retention_days ||
+    form.audit_detail_retention_days !== settings?.audit_detail_retention_days ||
     Boolean(adminPassword) || Boolean(signerToken)
   );
   const repositoryURL = versionInfo?.repository_url || defaultRepositoryURL;
@@ -249,10 +300,22 @@ export default function SettingsPage() {
         </section>
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <div className="flex items-center gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-700"><Bug size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">请求审计</h2><p className="mt-0.5 text-xs text-zinc-500">详细内容记录策略</p></div></div>
+          <div className="flex items-center gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-700"><Bug size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">请求审计</h2><p className="mt-0.5 text-xs text-zinc-500">详细内容记录与日志清理策略</p></div></div>
           <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <div><p className="text-sm font-medium text-zinc-800">审计调试模式</p><p className="mt-1 text-xs leading-5 text-amber-700">完整内容可能包含提示词、代码和其他敏感数据</p></div>
             <Switch aria-label="切换审计调试模式" color="primary" isSelected={form.audit_debug_enabled} onValueChange={(selected) => update('audit_debug_enabled', selected)}><span className="text-sm text-zinc-600">{form.audit_debug_enabled ? '已开启' : '已关闭'}</span></Switch>
+          </div>
+          <div className="grid border-t border-zinc-100 md:grid-cols-2 md:divide-x md:divide-zinc-100">
+            <div className="space-y-4 px-5 py-5 sm:px-6">
+              <div><p className="text-sm font-medium text-zinc-800">清理请求审计记录</p><p className="mt-1 text-xs leading-5 text-zinc-500">永久删除超过保留天数的完整审计记录，不影响账号和密钥累计统计。</p></div>
+              <Input isRequired description="默认 30 天；保存设置后作为下次默认值" label="审计记录保留天数" labelPlacement="outside" max={maxAuditRetentionDays} min={1} radius="sm" step={1} type="number" value={String(form.audit_retention_days)} onValueChange={(value) => update('audit_retention_days', Number(value) || 0)} />
+              <Button color="danger" isDisabled={loading} radius="sm" startContent={<Trash2 size={15} />} type="button" variant="flat" onPress={() => requestAuditCleanup('records')}>清理过期记录</Button>
+            </div>
+            <div className="space-y-4 border-t border-zinc-100 px-5 py-5 sm:px-6 md:border-t-0">
+              <div><p className="text-sm font-medium text-zinc-800">清理记录的详细日志</p><p className="mt-1 text-xs leading-5 text-zinc-500">保留审计摘要，仅清除过期记录的正文、Header、错误及重试详情。</p></div>
+              <Input isRequired description="默认 30 天；保存设置后作为下次默认值" label="详细日志保留天数" labelPlacement="outside" max={maxAuditRetentionDays} min={1} radius="sm" step={1} type="number" value={String(form.audit_detail_retention_days)} onValueChange={(value) => update('audit_detail_retention_days', Number(value) || 0)} />
+              <Button color="danger" isDisabled={loading} radius="sm" startContent={<Trash2 size={15} />} type="button" variant="flat" onPress={() => requestAuditCleanup('details')}>清理过期详情</Button>
+            </div>
           </div>
         </section>
 
@@ -263,6 +326,10 @@ export default function SettingsPage() {
 
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-zinc-400">配置文件：{settings?.data_path ? 'config.json' : '—'}</span><div className="flex items-center justify-end gap-3">{saved ? <span className="flex items-center gap-1.5 text-sm text-emerald-700" role="status"><Check size={16} />已保存</span> : null}<Button color="primary" isDisabled={!isDirty} isLoading={saving} radius="sm" startContent={saving ? null : <Save size={16} />} type="submit">保存设置</Button></div></div>
       </form>
+
+      <Modal isDismissable={!cleaningAudit} isKeyboardDismissDisabled={cleaningAudit} isOpen={cleanupConfirmation.isOpen} radius="sm" size="md" onOpenChange={cleanupConfirmation.onOpenChange}>
+        <ModalContent>{(onClose) => <><ModalHeader>{cleanupTarget === 'records' ? '确认清理审计记录' : '确认清理详细日志'}</ModalHeader><ModalBody><div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{cleanupTarget === 'records' ? <>将永久删除 <strong>{form.audit_retention_days} 天前</strong>的全部请求审计记录，此操作不可恢复。</> : <>将清除 <strong>{form.audit_detail_retention_days} 天前</strong>审计记录中的正文、Header、错误和重试详情，摘要记录仍会保留。此操作不可恢复。</>}</div><p className="text-xs leading-5 text-zinc-500">清理使用当前输入的天数；如需下次继续使用该值，请点击页面底部的“保存设置”。</p></ModalBody><ModalFooter><Button isDisabled={cleaningAudit} radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="danger" isLoading={cleaningAudit} radius="sm" startContent={cleaningAudit ? null : <Trash2 size={15} />} onPress={() => void cleanAuditLogs()}>确认清理</Button></ModalFooter></>}</ModalContent>
+      </Modal>
 
       <Modal isOpen={userAgentConfirmation.isOpen} radius="sm" size="sm" onOpenChange={userAgentConfirmation.onOpenChange}>
         <ModalContent>{(onClose) => <><ModalHeader>更新 User-Agent</ModalHeader><ModalBody><p className="text-sm leading-6 text-zinc-600">AtomCode 当前版本为 <code className="font-mono font-semibold text-zinc-900">{userAgentCandidate?.version}</code>，是否将 User-Agent 从 <code className="break-all font-mono text-zinc-700">{form.user_agent}</code> 替换为 <code className="break-all font-mono font-semibold text-zinc-900">{userAgentCandidate?.user_agent}</code>？</p></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>保留当前值</Button><Button color="primary" isLoading={replacingUserAgent} radius="sm" onPress={() => void replaceUserAgent()}>替换</Button></ModalFooter></>}</ModalContent>

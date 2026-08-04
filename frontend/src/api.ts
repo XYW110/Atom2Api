@@ -275,6 +275,11 @@ export interface AuditListResponse {
   pages: number;
 }
 
+export interface AuditCleanupResponse {
+  affected: number;
+  cutoff: string;
+}
+
 export interface SettingsResponse {
   user_agent: string;
   listen_address: string;
@@ -288,6 +293,8 @@ export interface SettingsResponse {
   request_timeout_seconds: number;
   request_retry_count: number;
   request_retry_status_codes: string;
+  audit_retention_days: number;
+  audit_detail_retention_days: number;
   default_password: boolean;
   loaded_at: string;
 }
