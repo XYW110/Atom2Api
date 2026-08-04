@@ -184,6 +184,7 @@ export interface AccountProtocolProbeResult {
 
 export interface DashboardSummary {
   requests: number;
+  rpm: number;
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;

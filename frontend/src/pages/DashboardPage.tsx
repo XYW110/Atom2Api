@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertCircle, ArrowDownToLine, ArrowUpFromLine, Clock3, Gauge, KeyRound, RefreshCw, Users } from 'lucide-react';
+import { Activity, AlertCircle, ArrowDownToLine, ArrowUpFromLine, Clock3, Gauge, KeyRound, RefreshCw, Timer, Users } from 'lucide-react';
 import { Button, ButtonGroup, Chip, Skeleton, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from '@heroui/react';
 import { PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
@@ -7,7 +7,7 @@ import { apiFetch, type DashboardResponse, errorMessage, formatDateTime, formatT
 
 const emptyDashboard: DashboardResponse = {
   range: '24h',
-  summary: { requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, success_rate: 0, average_latency_ms: 0, active_accounts: 0, total_accounts: 0, active_keys: 0 },
+  summary: { requests: 0, rpm: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, success_rate: 0, average_latency_ms: 0, active_accounts: 0, total_accounts: 0, active_keys: 0 },
   trend: [], model_distribution: [], recent_requests: [],
 };
 
@@ -61,6 +61,7 @@ export default function DashboardPage() {
   const totalModelRequests = useMemo(() => (data.model_distribution || []).reduce((sum, item) => sum + item.requests, 0), [data.model_distribution]);
   const stats = [
     { label: '请求数', value: formatTokens(data.summary.requests), icon: Activity, tone: 'bg-blue-50 text-blue-600' },
+    { label: 'RPM · 10 分钟均值', value: data.summary.rpm.toFixed(1), icon: Timer, tone: 'bg-cyan-50 text-cyan-600' },
     { label: '输入 Tokens', value: formatTokens(data.summary.input_tokens), icon: ArrowDownToLine, tone: 'bg-emerald-50 text-emerald-600' },
     { label: '输出 Tokens', value: formatTokens(data.summary.output_tokens), icon: ArrowUpFromLine, tone: 'bg-violet-50 text-violet-600' },
     { label: '成功率', value: `${data.summary.success_rate.toFixed(2)}%`, icon: Gauge, tone: 'bg-amber-50 text-amber-600' },
@@ -79,7 +80,7 @@ export default function DashboardPage() {
 
       {error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{error}</div> : null}
 
-      <section aria-label="关键指标" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="关键指标" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (

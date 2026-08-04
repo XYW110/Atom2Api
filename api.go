@@ -359,8 +359,11 @@ type dashboardResponse struct {
 	RecentRequests    []auditListItem     `json:"recent_requests"`
 }
 
+const dashboardRPMWindow = 10 * time.Minute
+
 type dashboardSummary struct {
 	Requests       int64   `json:"requests"`
+	RPM            float64 `json:"rpm"`
 	InputTokens    int64   `json:"input_tokens"`
 	OutputTokens   int64   `json:"output_tokens"`
 	TotalTokens    int64   `json:"total_tokens"`
@@ -585,6 +588,7 @@ func (a *API) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	start := now.Add(-duration)
+	rpmStart := now.Add(-dashboardRPMWindow)
 	bucketCount := int(duration / bucket)
 	trend := make([]dashboardTrend, bucketCount)
 	for i := 0; i < bucketCount; i++ {
@@ -614,6 +618,7 @@ func (a *API) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	var latencyTotal int64
 	var successes int64
+	var recentRequests int64
 	records := a.store.UsageRecords()
 	for i := len(records) - 1; i >= 0 && len(response.RecentRequests) < 20; i-- {
 		record := records[i]
@@ -622,6 +627,9 @@ func (a *API) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		if record.Timestamp.Before(start) || record.Timestamp.After(now.Add(time.Minute)) {
 			continue
+		}
+		if !record.Timestamp.Before(rpmStart) && !record.Timestamp.After(now) {
+			recentRequests++
 		}
 		response.Summary.Requests++
 		response.Summary.InputTokens += record.InputTokens
@@ -649,6 +657,7 @@ func (a *API) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		entry.InputTokens += record.InputTokens
 		entry.OutputTokens += record.OutputTokens
 	}
+	response.Summary.RPM = float64(recentRequests) / dashboardRPMWindow.Minutes()
 	response.Summary.TotalTokens = response.Summary.InputTokens + response.Summary.OutputTokens
 	if response.Summary.Requests > 0 {
 		response.Summary.SuccessRate = float64(successes) / float64(response.Summary.Requests) * 100
