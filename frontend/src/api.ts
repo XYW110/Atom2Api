@@ -244,6 +244,16 @@ export interface AuditRecordSummary {
   streaming: boolean;
   has_request_body: boolean;
   has_response_body: boolean;
+  retry_count: number;
+}
+
+export interface AuditRequestAttempt {
+  attempt: number;
+  status?: number;
+  latency_ms: number;
+  error?: string;
+  response_body?: string;
+  response_headers?: Record<string, string[]>;
 }
 
 export type AuditRecordDetail = Omit<AuditRecordSummary, 'has_request_body' | 'has_response_body'> & {
@@ -254,6 +264,7 @@ export type AuditRecordDetail = Omit<AuditRecordSummary, 'has_request_body' | 'h
   response_body?: string;
   request_headers?: Record<string, string[]>;
   response_headers?: Record<string, string[]>;
+  attempts?: AuditRequestAttempt[];
 };
 
 export interface AuditListResponse {
@@ -275,6 +286,8 @@ export interface SettingsResponse {
   signer_configured: boolean;
   audit_debug_enabled: boolean;
   request_timeout_seconds: number;
+  request_retry_count: number;
+  request_retry_status_codes: string;
   default_password: boolean;
   loaded_at: string;
 }

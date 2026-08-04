@@ -5,12 +5,26 @@ import { PageShell, StatusDot } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 import { apiFetch, type SettingsResponse, type UserAgentCheckResponse, type VersionInfo, errorMessage, formatDateTime, jsonRequest } from '../api';
 
-type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds'>;
+type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds' | 'request_retry_count' | 'request_retry_status_codes'>;
 type ProjectVersionInfo = VersionInfo & { repository_url: string };
 
 const emptyForm: SettingsForm = {
-  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120,
+  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120, request_retry_count: 0, request_retry_status_codes: '',
 };
+
+function settingsForm(response: SettingsResponse): SettingsForm {
+  return {
+    user_agent: response.user_agent,
+    platform_base_url: response.platform_base_url,
+    codingplan_api_url: response.codingplan_api_url,
+    gateway_url: response.gateway_url,
+    signer_url: response.signer_url,
+    audit_debug_enabled: response.audit_debug_enabled,
+    request_timeout_seconds: response.request_timeout_seconds,
+    request_retry_count: response.request_retry_count,
+    request_retry_status_codes: response.request_retry_status_codes,
+  };
+}
 
 const defaultRepositoryURL = 'https://github.com/cnluminous/Atom2Api';
 
@@ -42,15 +56,7 @@ export default function SettingsPage() {
     try {
       const response = await apiFetch<SettingsResponse>('/api/settings');
       setSettings(response);
-      setForm({
-        user_agent: response.user_agent,
-        platform_base_url: response.platform_base_url,
-        codingplan_api_url: response.codingplan_api_url,
-        gateway_url: response.gateway_url,
-        signer_url: response.signer_url,
-        audit_debug_enabled: response.audit_debug_enabled,
-        request_timeout_seconds: response.request_timeout_seconds,
-      });
+      setForm(settingsForm(response));
       setError('');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '无法加载设置');
@@ -91,6 +97,16 @@ export default function SettingsPage() {
       showToast('error', '保存设置失败', '必填设置不能为空');
       return;
     }
+    if (!Number.isInteger(form.request_retry_count) || form.request_retry_count < 0 || form.request_retry_count > 10) {
+      setError('请求重试次数必须是 0-10 之间的整数');
+      showToast('error', '保存设置失败', '请求重试次数必须是 0-10 之间的整数');
+      return;
+    }
+    if (form.request_retry_count > 0 && !form.request_retry_status_codes.trim()) {
+      setError('启用请求重试时必须填写重试状态码');
+      showToast('error', '保存设置失败', '启用请求重试时必须填写重试状态码');
+      return;
+    }
     setSaving(true);
     setSaved(false);
     try {
@@ -99,6 +115,7 @@ export default function SettingsPage() {
       if (signerToken) payload.signer_token = signerToken;
       const response = await apiFetch<SettingsResponse>('/api/settings', jsonRequest('PUT', payload));
       setSettings(response);
+      setForm(settingsForm(response));
       setAdminPassword('');
       setSignerToken('');
       setSaved(true);
@@ -174,7 +191,8 @@ export default function SettingsPage() {
     form.user_agent !== settings?.user_agent || form.platform_base_url !== settings?.platform_base_url ||
     form.codingplan_api_url !== settings?.codingplan_api_url || form.gateway_url !== settings?.gateway_url ||
     form.signer_url !== settings?.signer_url || form.audit_debug_enabled !== settings?.audit_debug_enabled ||
-    form.request_timeout_seconds !== settings?.request_timeout_seconds ||
+    form.request_timeout_seconds !== settings?.request_timeout_seconds || form.request_retry_count !== settings?.request_retry_count ||
+    form.request_retry_status_codes !== settings?.request_retry_status_codes ||
     Boolean(adminPassword) || Boolean(signerToken)
   );
   const repositoryURL = versionInfo?.repository_url || defaultRepositoryURL;
@@ -222,7 +240,12 @@ export default function SettingsPage() {
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <div className="flex items-center gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600"><Settings2 size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">请求参数</h2><p className="mt-0.5 text-xs text-zinc-500">上游客户端标识与超时</p></div></div>
-          <div className="grid gap-5 px-5 py-6 sm:grid-cols-[minmax(0,1fr)_220px] sm:px-6"><Input isRequired label="User-Agent" labelPlacement="outside" radius="sm" value={form.user_agent} classNames={{ input: 'font-mono text-sm' }} endContent={<Tooltip content="检查 AtomCode 最新版本"><Button isIconOnly aria-label="检查 AtomCode User-Agent" isDisabled={loading} isLoading={checkingUserAgent} radius="sm" size="sm" type="button" variant="light" onPress={() => void checkUserAgent()}>{checkingUserAgent ? null : <RefreshCw size={16} />}</Button></Tooltip>} onValueChange={(value) => update('user_agent', value)} /><Input isRequired label="请求超时（秒）" labelPlacement="outside" max={600} min={5} radius="sm" type="number" value={String(form.request_timeout_seconds)} onValueChange={(value) => update('request_timeout_seconds', Number(value) || 0)} /></div>
+          <div className="grid gap-5 px-5 py-6 sm:grid-cols-[minmax(0,1fr)_220px] sm:px-6">
+            <Input isRequired label="User-Agent" labelPlacement="outside" radius="sm" value={form.user_agent} classNames={{ input: 'font-mono text-sm' }} endContent={<Tooltip content="检查 AtomCode 最新版本"><Button isIconOnly aria-label="检查 AtomCode User-Agent" isDisabled={loading} isLoading={checkingUserAgent} radius="sm" size="sm" type="button" variant="light" onPress={() => void checkUserAgent()}>{checkingUserAgent ? null : <RefreshCw size={16} />}</Button></Tooltip>} onValueChange={(value) => update('user_agent', value)} />
+            <Input isRequired label="请求超时（秒）" labelPlacement="outside" max={600} min={5} radius="sm" type="number" value={String(form.request_timeout_seconds)} onValueChange={(value) => update('request_timeout_seconds', Number(value) || 0)} />
+            <Input description="逗号分隔，可输入范围或单个状态码；保存后自动归并" isRequired={form.request_retry_count > 0} label="重试状态码" labelPlacement="outside" placeholder="400-500,503,429" radius="sm" value={form.request_retry_status_codes} classNames={{ input: 'font-mono text-sm' }} onValueChange={(value) => update('request_retry_status_codes', value)} />
+            <Input description="0 表示请求失败后不重试" isRequired label="请求重试次数" labelPlacement="outside" max={10} min={0} radius="sm" step={1} type="number" value={String(form.request_retry_count)} onValueChange={(value) => update('request_retry_count', Number(value) || 0)} />
+          </div>
         </section>
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">

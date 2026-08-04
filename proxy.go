@@ -58,6 +58,11 @@ type auditResponseWriter struct {
 	body        bytes.Buffer
 }
 
+type capturedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
 func (w *auditResponseWriter) WriteHeader(status int) {
 	if w.status != 0 {
 		return
@@ -133,17 +138,27 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 	}
 	requestID := randomID("req")
 	w.Header().Set("X-Request-Id", requestID)
-	debugEnabled := p.config.Snapshot().AuditDebugEnabled
+	config := p.config.Snapshot()
+	debugEnabled := config.AuditDebugEnabled
+	retryStatuses, _ := parseRetryStatusCodes(config.RetryStatusCodes)
 	captured := &auditResponseWriter{ResponseWriter: w, captureBody: debugEnabled}
 	w = captured
 	audit := UsageRecord{
 		ID: requestID, Timestamp: started.UTC(), Method: r.Method, Path: r.URL.Path, APIKeyID: key.ID,
 	}
+	var finalAttemptBody *bytes.Buffer
+	var finalAttemptStarted time.Time
 	if debugEnabled {
 		audit.RequestHeaders = auditHeaders(r.Header)
 	}
 	defer func() {
 		finished := time.Now()
+		if finalAttemptBody != nil && len(audit.Attempts) > 0 {
+			finalAttempt := &audit.Attempts[len(audit.Attempts)-1]
+			finalAttempt.ResponseBody = finalAttemptBody.String()
+			finalAttempt.LatencyMS = finished.Sub(finalAttemptStarted).Milliseconds()
+			finalAttempt.Error = audit.Error
+		}
 		audit.LatencyMS = finished.Sub(started).Milliseconds()
 		if audit.Streaming && !firstTokenAt.IsZero() {
 			audit.FirstTokenLatencyMS = firstTokenAt.Sub(started).Milliseconds()
@@ -233,7 +248,7 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		writeOpenAIError(w, http.StatusInternalServerError, "server_error", "could not encode upstream request")
 		return
 	}
-	timeout := time.Duration(p.config.Snapshot().RequestTimeoutSecs) * time.Second
+	timeout := time.Duration(config.RequestTimeoutSecs) * time.Second
 	requestContext, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	requestPath := r.URL.Path
@@ -249,7 +264,44 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		}
 		requestPath = "/v1/chat/completions"
 	}
-	request, response, err := p.doUpstreamRequest(requestContext, route, requestPath, requestBody, streaming, requestID)
+	var request *http.Request
+	var response *http.Response
+	for attempt := 1; ; attempt++ {
+		attemptStarted := time.Now()
+		request, response, err = p.doUpstreamRequest(requestContext, route, requestPath, requestBody, streaming, requestID)
+		if err != nil {
+			if audit.RetryCount > 0 {
+				audit.Attempts = append(audit.Attempts, RequestAttempt{
+					Attempt: attempt, LatencyMS: time.Since(attemptStarted).Milliseconds(), Error: err.Error(),
+				})
+			}
+			break
+		}
+		if audit.RetryCount >= config.RequestRetryCount || !retryStatuses.Contains(response.StatusCode) {
+			if audit.RetryCount > 0 {
+				finalAttemptStarted = attemptStarted
+				finalAttemptBody = &bytes.Buffer{}
+				response.Body = &capturedReadCloser{Reader: io.TeeReader(response.Body, finalAttemptBody), Closer: response.Body}
+				audit.Attempts = append(audit.Attempts, RequestAttempt{
+					Attempt: attempt, Status: response.StatusCode,
+					LatencyMS: time.Since(attemptStarted).Milliseconds(), ResponseHeaders: auditHeaders(response.Header),
+				})
+			}
+			break
+		}
+
+		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<20))
+		_ = response.Body.Close()
+		attemptError := compactError(responseBody)
+		if readErr != nil {
+			attemptError = readErr.Error()
+		}
+		audit.Attempts = append(audit.Attempts, RequestAttempt{
+			Attempt: attempt, Status: response.StatusCode, LatencyMS: time.Since(attemptStarted).Milliseconds(),
+			Error: attemptError, ResponseBody: string(responseBody), ResponseHeaders: auditHeaders(response.Header),
+		})
+		audit.RetryCount++
+	}
 	if err != nil {
 		if request != nil {
 			audit.RequestHeaders = auditHeaders(request.Header)
@@ -259,10 +311,10 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		return
 	}
 	defer response.Body.Close()
-	if debugEnabled || response.StatusCode >= http.StatusBadRequest {
+	if debugEnabled || audit.RetryCount > 0 || response.StatusCode >= http.StatusBadRequest {
 		audit.RequestHeaders = auditHeaders(request.Header)
 	}
-	if debugEnabled || response.StatusCode != http.StatusOK {
+	if debugEnabled || audit.RetryCount > 0 || response.StatusCode != http.StatusOK {
 		captured.captureBody = true
 		audit.ResponseHeaders = auditHeaders(response.Header)
 	}

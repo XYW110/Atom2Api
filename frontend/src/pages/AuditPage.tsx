@@ -31,7 +31,7 @@ import {
   Tabs,
   Tooltip,
 } from '@heroui/react';
-import { apiFetch, type AuditListResponse, type AuditRecordDetail, type AuditRecordSummary, errorMessage, formatTokens } from '../api';
+import { apiFetch, type AuditListResponse, type AuditRecordDetail, type AuditRecordSummary, type AuditRequestAttempt, errorMessage, formatTokens } from '../api';
 import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
@@ -225,6 +225,34 @@ function StreamBodyViewer({ body, emptyText, copyLabel }: { body?: string; empty
   return <TextViewer content={content} copyLabel={copyLabel} controls={controls} emptyText={emptyText} />;
 }
 
+function AttemptViewer({ attempts, streaming }: { attempts: AuditRequestAttempt[]; streaming: boolean }) {
+  const [selected, setSelected] = useState(0);
+  useEffect(() => setSelected(0), [attempts]);
+  const attempt = attempts[Math.min(selected, attempts.length - 1)];
+  if (!attempt) return null;
+
+  return (
+    <div className="border-t border-zinc-200">
+      <div className="flex flex-wrap gap-2 border-b border-zinc-200 bg-zinc-50 px-5 py-3">
+        {attempts.map((item, index) => (
+          <Button key={item.attempt} color={selected === index ? 'primary' : 'default'} radius="sm" size="sm" variant={selected === index ? 'solid' : 'bordered'} onPress={() => setSelected(index)}>
+            {item.attempt === 1 ? '首次请求' : `第 ${item.attempt - 1} 次重试`} · {item.status || '无响应'}
+          </Button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-5 py-3 text-xs text-zinc-500">
+        <Chip color={statusColor(attempt.status || 0)} radius="sm" size="sm" variant="flat">{attempt.status || '无状态码'}</Chip>
+        <span>耗时 {formatLatency(attempt.latency_ms)}</span>
+        {attempt.error ? <span className="break-all text-red-600">{attempt.error}</span> : null}
+      </div>
+      <Tabs aria-label="单次请求响应详情" classNames={{ base: 'px-5 pt-3', panel: 'p-0 pt-3' }} color="primary" variant="underlined">
+        <Tab key="attempt-response" title="响应内容">{streaming ? <StreamBodyViewer body={attempt.response_body} copyLabel="复制响应内容" emptyText="本次请求没有响应正文" /> : <BodyViewer body={attempt.response_body} copyLabel="复制响应内容" emptyText="本次请求没有响应正文" />}</Tab>
+        <Tab key="attempt-headers" title="响应 Header"><HeaderViewer headers={attempt.response_headers} copyLabel="复制响应 Header" emptyText="本次请求没有响应 Header" /></Tab>
+      </Tabs>
+    </div>
+  );
+}
+
 export default function AuditPage() {
   const [data, setData] = useState<AuditListResponse>(emptyResult);
   const [page, setPage] = useState(1);
@@ -372,8 +400,8 @@ export default function AuditPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Button aria-label={`查看请求 ${record.id} 的完整内容，状态码 ${record.status}`} color={statusColor(record.status)} radius="sm" size="sm" variant="flat" onPress={() => void openDetail(record)}>
-                      <span className="font-mono text-xs font-semibold">{record.status || '—'}</span>
+                    <Button aria-label={`查看请求 ${record.id} 的完整内容，状态码 ${record.status}，重试 ${record.retry_count} 次`} className="h-auto min-h-8 py-1" color={statusColor(record.status)} radius="sm" size="sm" variant="flat" onPress={() => void openDetail(record)}>
+                      <span className="flex flex-col items-center font-mono text-xs font-semibold"><span>{record.status || '—'}</span>{record.retry_count > 0 ? <span className="text-[10px] font-normal">重试 {record.retry_count} 次</span> : null}</span>
                     </Button>
                   </TableCell>
                   <TableCell><LatencyBreakdown record={record} /></TableCell>
@@ -406,15 +434,15 @@ export default function AuditPage() {
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">模型</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.model}>{detail.model || '未知模型'}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">路由账号</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.account_name || undefined}>{detail.account_name || '—'}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">密钥</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.key_name || undefined}>{detail.key_name || '—'}</p></div>
-                  <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">状态与耗时</p><div className="mt-1 flex items-center gap-3"><Chip color={statusColor(detail.status)} radius="sm" size="sm" variant="flat">{detail.status}</Chip><LatencyBreakdown record={detail} /></div></div>
+                  <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">状态与耗时</p><div className="mt-1 flex items-center gap-3"><Chip color={statusColor(detail.status)} radius="sm" size="sm" variant="flat">{detail.status}</Chip><LatencyBreakdown record={detail} /></div>{detail.retry_count > 0 ? <p className="mt-1 text-[11px] font-medium text-amber-600">已重试 {detail.retry_count} 次</p> : null}</div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">请求时间</p><time className="mt-1 block whitespace-nowrap text-xs tabular-nums text-zinc-700" dateTime={detail.timestamp}>{formatRequestTime(detail.timestamp)}</time></div>
                 </div>
                 {detail.error ? <div className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-5 py-3 text-xs text-red-700"><AlertCircle className="mt-0.5 shrink-0" size={14} /><span className="break-all">{detail.error}</span></div> : null}
                 <Tabs aria-label="请求和响应详情" classNames={{ base: 'px-5 pt-3', panel: 'p-0 pt-3' }} color="primary" variant="underlined">
                   <Tab key="request" title="请求内容"><BodyViewer body={detail.request_body} copyLabel="复制请求内容" emptyText="此历史记录未保存请求正文" /></Tab>
                   <Tab key="request-headers" title="请求 Header"><HeaderViewer headers={detail.request_headers} copyLabel="复制请求 Header" emptyText="此历史记录未保存请求 Header" /></Tab>
-                  <Tab key="response" title="响应内容">{detail.streaming ? <StreamBodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" /> : <BodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" />}</Tab>
-                  <Tab key="response-headers" title="响应 Header"><HeaderViewer headers={detail.response_headers} copyLabel="复制响应 Header" emptyText="此历史记录未保存响应 Header" /></Tab>
+                  {detail.attempts && detail.attempts.length > 0 ? <Tab key="attempts" title={`响应明细 (${detail.attempts.length})`}><AttemptViewer attempts={detail.attempts} streaming={detail.streaming} /></Tab> : <Tab key="response" title="响应内容">{detail.streaming ? <StreamBodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" /> : <BodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" />}</Tab>}
+                  {detail.attempts && detail.attempts.length > 0 ? null : <Tab key="response-headers" title="响应 Header"><HeaderViewer headers={detail.response_headers} copyLabel="复制响应 Header" emptyText="此历史记录未保存响应 Header" /></Tab>}
                 </Tabs>
               </>
             ) : null}

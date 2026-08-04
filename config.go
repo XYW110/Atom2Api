@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,68 @@ type Config struct {
 	SignerToken        string `json:"signer_token,omitempty"`
 	AuditDebugEnabled  bool   `json:"audit_debug_enabled"`
 	RequestTimeoutSecs int    `json:"request_timeout_seconds"`
+	RequestRetryCount  int    `json:"request_retry_count"`
+	RetryStatusCodes   string `json:"request_retry_status_codes"`
+}
+
+type retryStatusCodeSet [600]bool
+
+func parseRetryStatusCodes(value string) (retryStatusCodeSet, error) {
+	var statuses retryStatusCodeSet
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return statuses, nil
+	}
+	for _, rawPart := range strings.Split(value, ",") {
+		part := strings.TrimSpace(rawPart)
+		if part == "" {
+			return retryStatusCodeSet{}, errors.New("request_retry_status_codes contains an empty item")
+		}
+		bounds := strings.Split(part, "-")
+		if len(bounds) > 2 {
+			return retryStatusCodeSet{}, fmt.Errorf("invalid retry status code range %q", part)
+		}
+		start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
+		if err != nil || start < 100 || start > 599 {
+			return retryStatusCodeSet{}, fmt.Errorf("retry status code %q must be between 100 and 599", part)
+		}
+		end := start
+		if len(bounds) == 2 {
+			end, err = strconv.Atoi(strings.TrimSpace(bounds[1]))
+			if err != nil || end < 100 || end > 599 || end < start {
+				return retryStatusCodeSet{}, fmt.Errorf("invalid retry status code range %q", part)
+			}
+		}
+		for status := start; status <= end; status++ {
+			statuses[status] = true
+		}
+	}
+	return statuses, nil
+}
+
+func (statuses retryStatusCodeSet) String() string {
+	parts := make([]string, 0)
+	for start := 100; start <= 599; {
+		if !statuses[start] {
+			start++
+			continue
+		}
+		end := start
+		for end < 599 && statuses[end+1] {
+			end++
+		}
+		if start == end {
+			parts = append(parts, strconv.Itoa(start))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d-%d", start, end))
+		}
+		start = end + 1
+	}
+	return strings.Join(parts, ",")
+}
+
+func (statuses retryStatusCodeSet) Contains(status int) bool {
+	return status >= 0 && status < len(statuses) && statuses[status]
 }
 
 type ConfigSnapshot struct {
@@ -154,6 +217,14 @@ func normalizeConfig(config *Config) (bool, error) {
 	changed = changed || passwordChanged
 	if config.RequestTimeoutSecs == 0 {
 		config.RequestTimeoutSecs = 120
+		changed = true
+	}
+	retryStatuses, err := parseRetryStatusCodes(config.RetryStatusCodes)
+	if err != nil {
+		return false, err
+	}
+	if normalized := retryStatuses.String(); normalized != config.RetryStatusCodes {
+		config.RetryStatusCodes = normalized
 		changed = true
 	}
 	if strings.TrimSpace(config.EncryptionKey) == "" {
@@ -348,6 +419,16 @@ func validateConfig(config Config) error {
 	}
 	if config.RequestTimeoutSecs < 5 || config.RequestTimeoutSecs > 600 {
 		return errors.New("request_timeout_seconds must be between 5 and 600")
+	}
+	if config.RequestRetryCount < 0 || config.RequestRetryCount > 10 {
+		return errors.New("request_retry_count must be between 0 and 10")
+	}
+	retryStatuses, err := parseRetryStatusCodes(config.RetryStatusCodes)
+	if err != nil {
+		return err
+	}
+	if config.RequestRetryCount > 0 && retryStatuses.String() == "" {
+		return errors.New("request_retry_status_codes must not be empty when request retries are enabled")
 	}
 	if _, err := encryptionKey(config.EncryptionKey); err != nil {
 		return err

@@ -406,6 +406,7 @@ type auditListItem struct {
 	Streaming           bool      `json:"streaming"`
 	HasRequestBody      bool      `json:"has_request_body"`
 	HasResponseBody     bool      `json:"has_response_body"`
+	RetryCount          int       `json:"retry_count"`
 }
 
 type auditListResponse struct {
@@ -435,6 +436,7 @@ func auditItem(record UsageRecord, accountName, keyName string) auditListItem {
 		OutputTokens: record.OutputTokens, CachedTokens: record.CachedTokens,
 		ReasoningTokens: record.ReasoningTokens, Streaming: record.Streaming,
 		HasRequestBody: record.RequestBody != "", HasResponseBody: record.ResponseBody != "",
+		RetryCount: record.RetryCount,
 	}
 }
 

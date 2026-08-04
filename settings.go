@@ -20,6 +20,8 @@ type settingsResponse struct {
 	SignerConfigured   bool      `json:"signer_configured"`
 	AuditDebugEnabled  bool      `json:"audit_debug_enabled"`
 	RequestTimeoutSecs int       `json:"request_timeout_seconds"`
+	RequestRetryCount  int       `json:"request_retry_count"`
+	RetryStatusCodes   string    `json:"request_retry_status_codes"`
 	DefaultPassword    bool      `json:"default_password"`
 	LoadedAt           time.Time `json:"loaded_at"`
 }
@@ -34,6 +36,8 @@ type updateSettingsRequest struct {
 	AdminPassword      *string `json:"admin_password"`
 	AuditDebugEnabled  *bool   `json:"audit_debug_enabled"`
 	RequestTimeoutSecs *int    `json:"request_timeout_seconds"`
+	RequestRetryCount  *int    `json:"request_retry_count"`
+	RetryStatusCodes   *string `json:"request_retry_status_codes"`
 }
 
 type errorResponse struct {
@@ -90,6 +94,12 @@ func handleUpdateSettings(config *ConfigManager) http.HandlerFunc {
 		if request.RequestTimeoutSecs != nil {
 			updated.RequestTimeoutSecs = *request.RequestTimeoutSecs
 		}
+		if request.RequestRetryCount != nil {
+			updated.RequestRetryCount = *request.RequestRetryCount
+		}
+		if request.RetryStatusCodes != nil {
+			updated.RetryStatusCodes = *request.RetryStatusCodes
+		}
 		if err := config.Update(updated); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -118,7 +128,8 @@ func writeSettingsResponse(w http.ResponseWriter, status int, snapshot ConfigSna
 		GatewayURL: snapshot.GatewayURL, SignerURL: snapshot.SignerURL,
 		SignerConfigured: true, AuditDebugEnabled: snapshot.AuditDebugEnabled,
 		RequestTimeoutSecs: snapshot.RequestTimeoutSecs,
-		DefaultPassword:    defaultAdminPasswordActive(snapshot.AdminPassword), LoadedAt: snapshot.LoadedAt,
+		RequestRetryCount:  snapshot.RequestRetryCount, RetryStatusCodes: snapshot.RetryStatusCodes,
+		DefaultPassword: defaultAdminPasswordActive(snapshot.AdminPassword), LoadedAt: snapshot.LoadedAt,
 	})
 }
 

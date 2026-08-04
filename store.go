@@ -315,6 +315,17 @@ type UsageRecord struct {
 	ResponseBody        string              `json:"response_body,omitempty"`
 	RequestHeaders      map[string][]string `json:"request_headers,omitempty"`
 	ResponseHeaders     map[string][]string `json:"response_headers,omitempty"`
+	RetryCount          int                 `json:"retry_count,omitempty"`
+	Attempts            []RequestAttempt    `json:"attempts,omitempty"`
+}
+
+type RequestAttempt struct {
+	Attempt         int                 `json:"attempt"`
+	Status          int                 `json:"status,omitempty"`
+	LatencyMS       int64               `json:"latency_ms"`
+	Error           string              `json:"error,omitempty"`
+	ResponseBody    string              `json:"response_body,omitempty"`
+	ResponseHeaders map[string][]string `json:"response_headers,omitempty"`
 }
 
 type persistedState struct {

@@ -194,3 +194,40 @@ func TestConfigManagerUpdatePersistsImmediately(t *testing.T) {
 		t.Fatalf("persisted UserAgent = %q", got)
 	}
 }
+
+func TestRetryStatusCodesNormalizeOverlapsAndAdjacentValues(t *testing.T) {
+	tests := map[string]string{
+		"400-500,503,429":         "400-500,503",
+		"400-500,501,502,503":     "400-503",
+		"503, 429, 500-502, 429":  "429,500-503",
+		"400-400,401,403,402,500": "400-403,500",
+	}
+	for input, want := range tests {
+		statuses, err := parseRetryStatusCodes(input)
+		if err != nil {
+			t.Fatalf("parseRetryStatusCodes(%q): %v", input, err)
+		}
+		if got := statuses.String(); got != want {
+			t.Fatalf("parseRetryStatusCodes(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestRequestRetryConfigValidation(t *testing.T) {
+	config, err := defaultConfig()
+	if err != nil {
+		t.Fatalf("defaultConfig: %v", err)
+	}
+	config.RequestRetryCount = 11
+	if err := validateConfig(config); err == nil {
+		t.Fatal("validateConfig accepted more than 10 retries")
+	}
+	config.RequestRetryCount = 1
+	if err := validateConfig(config); err == nil {
+		t.Fatal("validateConfig accepted retries without status codes")
+	}
+	config.RetryStatusCodes = "99,600,503-500"
+	if _, err := normalizeConfig(&config); err == nil {
+		t.Fatal("normalizeConfig accepted invalid status codes")
+	}
+}

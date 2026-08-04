@@ -22,7 +22,7 @@ func TestSettingsHandlers(t *testing.T) {
 		t.Fatalf("GET status = %d", getResponse.Code)
 	}
 
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"user_agent":"api-client/3.0","admin_password":"updated-secret","audit_debug_enabled":true}`))
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"user_agent":"api-client/3.0","admin_password":"updated-secret","audit_debug_enabled":true,"request_retry_count":3,"request_retry_status_codes":"500-502,503,429,500"}`))
 	updateRequest.Header.Set("Content-Type", "application/json")
 	updateResponse := httptest.NewRecorder()
 	handleUpdateSettings(manager).ServeHTTP(updateResponse, updateRequest)
@@ -34,7 +34,7 @@ func TestSettingsHandlers(t *testing.T) {
 	if err := json.Unmarshal(updateResponse.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode PUT response: %v", err)
 	}
-	if response.UserAgent != "api-client/3.0" || !response.AuditDebugEnabled {
+	if response.UserAgent != "api-client/3.0" || !response.AuditDebugEnabled || response.RequestRetryCount != 3 || response.RetryStatusCodes != "429,500-503" {
 		t.Fatalf("PUT response = %#v", response)
 	}
 	if got := manager.Snapshot().UserAgent; got != "api-client/3.0" {
@@ -42,6 +42,9 @@ func TestSettingsHandlers(t *testing.T) {
 	}
 	if !manager.Snapshot().AuditDebugEnabled {
 		t.Fatal("runtime AuditDebugEnabled = false")
+	}
+	if snapshot := manager.Snapshot(); snapshot.RequestRetryCount != 3 || snapshot.RetryStatusCodes != "429,500-503" {
+		t.Fatalf("runtime retry settings = (%d, %q)", snapshot.RequestRetryCount, snapshot.RetryStatusCodes)
 	}
 	if password := manager.Snapshot().AdminPassword; password == "updated-secret" || !adminPasswordMatches(password, "updated-secret") {
 		t.Fatal("runtime admin password is not stored as a matching bcrypt hash")

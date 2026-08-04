@@ -127,8 +127,10 @@ curl http://localhost:8080/v1/chat/completions \
 | `signer_url` | Empty | Optional external signing service; the built-in signer is used when empty |
 | `audit_debug_enabled` | `false` | Records full request/response bodies and sanitized headers when enabled |
 | `request_timeout_seconds` | `120` | Upstream request timeout, from 5 to 600 seconds |
+| `request_retry_count` | `0` | Number of retries for matching upstream HTTP statuses, from 0 to 10; 0 disables retries |
+| `request_retry_status_codes` | Empty | Comma-separated statuses and ranges, such as `400-500,503,429`; overlapping and adjacent values are merged automatically |
 
-All runtime state is stored in the SQLite database at `data_path`, including accounts, API keys, model settings, plan claim logs, and the latest 50,000 request records used for dashboard aggregation. On startup, an existing legacy JSON state file and its `<data_path>.usage.ndjson` log are migrated transactionally into the database and removed only after the migration commits. By default only request metadata and usage are retained. Full bodies and headers are stored only when audit debug mode is enabled. Upstream responses with a non-200 status are retained regardless of that setting. Authentication, cookie, token, API key, and signature header values are redacted.
+All runtime state is stored in the SQLite database at `data_path`, including accounts, API keys, model settings, plan claim logs, and the latest 50,000 request records used for dashboard aggregation. On startup, an existing legacy JSON state file and its `<data_path>.usage.ndjson` log are migrated transactionally into the database and removed only after the migration commits. By default only request metadata and usage are retained. Full bodies and headers are stored only when audit debug mode is enabled. Upstream responses with a non-200 status are retained regardless of that setting. Retries stay in the original audit record, which reports the retry count and retains every attempt's response body and sanitized headers. Authentication, cookie, token, API key, and signature header values are redacted.
 
 ## Signing Compatibility
 
