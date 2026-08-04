@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
-import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Textarea, Tooltip, useDisclosure } from '@heroui/react';
+import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Pagination, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Textarea, Tooltip, useDisclosure } from '@heroui/react';
 import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
@@ -131,6 +131,9 @@ function ProtocolProbeStatus({ result }: { result: ProtocolProbeResult }) {
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<Account['status'] | ''>('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -231,8 +234,17 @@ export default function AccountsPage() {
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return accounts.filter((account) => !normalized || account.name.toLowerCase().includes(normalized) || account.user.username.toLowerCase().includes(normalized) || account.id.includes(normalized) || account.note.toLowerCase().includes(normalized));
-  }, [accounts, query]);
+    return accounts.filter((account) => {
+      const matchesQuery = !normalized || account.name.toLowerCase().includes(normalized) || account.user.username.toLowerCase().includes(normalized) || account.id.includes(normalized) || account.note.toLowerCase().includes(normalized);
+      return matchesQuery && (!statusFilter || account.status === statusFilter);
+    });
+  }, [accounts, query, statusFilter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page, pageSize]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const startOAuth = async () => {
     setBusy('oauth');
@@ -442,12 +454,12 @@ export default function AccountsPage() {
       </section>
 
       <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="flex flex-col gap-3 border-b border-zinc-100 p-4 sm:flex-row sm:items-center sm:justify-between"><Input aria-label="搜索账号" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /><div className="grid grid-cols-2 gap-2 sm:flex"><Button color="primary" isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'claim:all')} isLoading={busy === 'claim:all'} radius="sm" startContent={busy === 'claim:all' ? null : <Gift size={16} />} variant="flat" onPress={() => void runBatchAction('claim')}>一键领取 Plan</Button><Button isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'sync:all')} isLoading={busy === 'sync:all'} radius="sm" startContent={busy === 'sync:all' ? null : <RefreshCw size={16} />} variant="bordered" onPress={() => void runBatchAction('sync')}>一键同步额度</Button></div></div>
+        <div className="flex flex-col gap-3 border-b border-zinc-100 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-col gap-3 sm:flex-row"><Input aria-label="搜索账号" className="w-full sm:w-80" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={(value) => { setQuery(value); setPage(1); }} /><select aria-label="筛选账号状态" className="h-10 min-w-32 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as Account['status'] | ''); setPage(1); }}><option value="">全部状态</option><option value="active">运行中</option><option value="paused">已暂停</option><option value="error">异常</option><option value="syncing">同步中</option></select></div><div className="grid grid-cols-2 gap-2 sm:flex"><Button color="primary" isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'claim:all')} isLoading={busy === 'claim:all'} radius="sm" startContent={busy === 'claim:all' ? null : <Gift size={16} />} variant="flat" onPress={() => void runBatchAction('claim')}>一键领取 Plan</Button><Button isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'sync:all')} isLoading={busy === 'sync:all'} radius="sm" startContent={busy === 'sync:all' ? null : <RefreshCw size={16} />} variant="bordered" onPress={() => void runBatchAction('sync')}>一键同步额度</Button></div></div>
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto">
             <Table aria-label="AtomGit 账号列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
               <TableHeader><TableColumn>账号</TableColumn><TableColumn>订阅</TableColumn><TableColumn>当前窗口</TableColumn><TableColumn>可用模型</TableColumn><TableColumn>代理用量</TableColumn><TableColumn>最近同步</TableColumn><TableColumn>计划领取</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
-              <TableBody items={filtered} emptyContent={<EmptyState icon={Users} title="尚未连接账号" description="连接 AtomGit 后将自动领取或同步 Coding Plan" />}>
+              <TableBody items={paginated} emptyContent={<EmptyState icon={Users} title={accounts.length === 0 ? '尚未连接账号' : '没有匹配账号'} description={accounts.length === 0 ? '连接 AtomGit 后将自动领取或同步 Coding Plan' : '请调整搜索条件或账号状态筛选'} />}>
                 {(account) => {
                   const usage = accountUsage(account);
                   const status = statusMeta[account.status] || statusMeta.error;
@@ -469,7 +481,10 @@ export default function AccountsPage() {
             </Table>
           </div>
         )}
-        <div className="border-t border-zinc-100 px-5 py-3 text-xs text-zinc-400">共 {filtered.length} 个账号</div>
+        <div className="flex min-h-16 flex-col items-center justify-between gap-3 border-t border-zinc-100 px-4 py-3 text-xs text-zinc-500 sm:flex-row">
+          <div className="flex items-center gap-3"><span>共 {filtered.length} 个账号 · 第 {filtered.length ? page : 0} / {filtered.length ? totalPages : 0} 页</span><label className="flex items-center gap-2"><span>每页</span><select aria-label="每页显示账号数量" className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select><span>项</span></label></div>
+          <Pagination aria-label="账号列表分页" isCompact showControls page={page} total={totalPages} onChange={setPage} />
+        </div>
       </section>
 
       <Modal isOpen={oauthModal.isOpen} radius="sm" onOpenChange={oauthModal.onOpenChange}>
