@@ -8,6 +8,7 @@ services:
     environment:
       PORT: "8080"
       ATOM2API_CONFIG: /data/config.json
+      TZ: Asia/Shanghai
     volumes:
       - ./data:/data
     healthcheck:
