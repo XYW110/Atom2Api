@@ -216,7 +216,7 @@ export default function AuditPage() {
             aria-label="搜索请求"
             className="w-full lg:max-w-sm"
             classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }}
-            placeholder="搜索请求 ID、路径或模型"
+            placeholder="搜索请求 ID、路径、模型或账号"
             radius="sm"
             startContent={<Search size={16} className="text-zinc-400" />}
             value={query}
@@ -255,6 +255,7 @@ export default function AuditPage() {
               <TableColumn>请求</TableColumn>
               <TableColumn>方式</TableColumn>
               <TableColumn>模型</TableColumn>
+              <TableColumn>路由账号</TableColumn>
               <TableColumn>密钥</TableColumn>
               <TableColumn>Tokens</TableColumn>
               <TableColumn>状态码</TableColumn>
@@ -277,6 +278,7 @@ export default function AuditPage() {
                   </TableCell>
                   <TableCell><span className={`inline-flex min-w-14 justify-center rounded px-2 py-1 font-mono text-[11px] font-semibold ring-1 ring-inset ${methodClass(record.method)}`}>{record.method}</span></TableCell>
                   <TableCell><div className="min-w-40 max-w-60"><p className="truncate font-medium text-zinc-800" title={record.model}>{record.model || '未知模型'}</p>{record.streaming ? <p className="mt-1 text-[11px] text-blue-600">流式响应</p> : null}</div></TableCell>
+                  <TableCell><span className="block min-w-28 max-w-48 truncate text-zinc-600" title={record.account_name || undefined}>{record.account_name || '—'}</span></TableCell>
                   <TableCell><span className="block min-w-28 max-w-48 truncate text-zinc-600" title={record.key_name || undefined}>{record.key_name || '—'}</span></TableCell>
                   <TableCell>
                     <div className="min-w-28">
@@ -314,9 +316,10 @@ export default function AuditPage() {
             {detailError ? <div className="m-6 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{detailError}</div> : null}
             {detail ? (
               <>
-                <div className="grid gap-px border-b border-zinc-200 bg-zinc-200 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid gap-px border-b border-zinc-200 bg-zinc-200 sm:grid-cols-2 lg:grid-cols-6">
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">请求</p><p className="mt-1 truncate font-mono text-xs font-medium text-zinc-800"><span className="mr-2 text-blue-600">{detail.method}</span>{detail.path}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">模型</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.model}>{detail.model || '未知模型'}</p></div>
+                  <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">路由账号</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.account_name || undefined}>{detail.account_name || '—'}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">密钥</p><p className="mt-1 truncate text-xs font-medium text-zinc-800" title={detail.key_name || undefined}>{detail.key_name || '—'}</p></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">状态与耗时</p><div className="mt-1 flex items-center gap-3"><Chip color={statusColor(detail.status)} radius="sm" size="sm" variant="flat">{detail.status}</Chip><LatencyBreakdown record={detail} /></div></div>
                   <div className="bg-white px-5 py-3"><p className="text-[11px] text-zinc-400">请求时间</p><time className="mt-1 block whitespace-nowrap text-xs tabular-nums text-zinc-700" dateTime={detail.timestamp}>{formatRequestTime(detail.timestamp)}</time></div>
