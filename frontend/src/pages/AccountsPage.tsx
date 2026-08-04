@@ -23,8 +23,14 @@ interface OAuthState {
 const RESET_DATA_RELOAD_DELAY_MS = 5_000;
 const RESET_DATA_RELOAD_RETRY_MS = 5_000;
 
+function currentRateLimitWindow(account: Account) {
+  return (account.plan.rate_limit_windows || [])
+    .filter((window) => window.show_enable === 1)
+    .sort((a, b) => a.window_size_seconds - b.window_size_seconds)[0];
+}
+
 function accountUsage(account: Account) {
-  const visible = (account.plan.rate_limit_windows || []).filter((window) => window.show_enable === 1).sort((a, b) => a.window_size_seconds - b.window_size_seconds)[0];
+  const visible = currentRateLimitWindow(account);
   if (visible) return { percent: visible.usage_percent, label: `${visible.calls_used.toLocaleString()} / ${visible.call_limit.toLocaleString()} 次`, resetAt: visible.reset_at, secondsUntilReset: visible.seconds_until_reset };
   const current = account.plan.current_usage;
   if (current) return { percent: current.usage_percent, label: `${formatTokens(current.window_tokens_used)} / ${formatTokens(current.window_token_limit)} tokens`, resetAt: current.reset_at, secondsUntilReset: current.seconds_until_reset };
@@ -417,6 +423,10 @@ export default function AccountsPage() {
   };
 
   const activeCount = accounts.filter((account) => account.enabled && account.status === 'active').length;
+  const availableConversations = accounts.reduce((sum, account) => {
+    const window = currentRateLimitWindow(account);
+    return sum + (window ? Math.max(0, window.call_limit - window.calls_used) : 0);
+  }, 0);
   const providerTokens = accounts.reduce((sum, account) => sum + (account.provider_usage?.total_tokens || 0), 0);
   const batchBusy = busy === 'claim:all' || busy === 'sync:all';
 
@@ -424,9 +434,10 @@ export default function AccountsPage() {
     <PageShell title="账号管理" description="AtomGit OAuth 账户、Coding Plan 权益与滚动额度" action={{ label: '连接 AtomGit', icon: Plus, onPress: () => void startOAuth() }}>
       {error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{error}</div> : null}
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border border-zinc-200 bg-white px-5 py-4"><p className="text-xs text-zinc-500">已连接账号</p><p className="mt-1 text-xl font-semibold text-zinc-900">{accounts.length}</p></div>
         <div className="rounded-lg border border-zinc-200 bg-white px-5 py-4"><p className="text-xs text-zinc-500">当前可调度</p><p className="mt-1 text-xl font-semibold text-emerald-600">{activeCount}</p></div>
+        <div className="rounded-lg border border-zinc-200 bg-white px-5 py-4"><p className="text-xs text-zinc-500">当前可用对话次数</p><p className="mt-1 text-xl font-semibold text-blue-600">{availableConversations.toLocaleString()}</p></div>
         <div className="rounded-lg border border-zinc-200 bg-white px-5 py-4"><p className="text-xs text-zinc-500">Coding Plan 近 60 天 Tokens</p><p className="mt-1 text-xl font-semibold text-zinc-900">{formatTokens(providerTokens)}</p></div>
       </section>
 
