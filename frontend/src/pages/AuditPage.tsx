@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import {
   Button,
+  ButtonGroup,
   Chip,
   Input,
   Modal,
@@ -94,20 +95,77 @@ function readableBody(body?: string) {
   }
 }
 
-function serializedHeaders(headers?: Record<string, string[]>) {
+function formattedHeaders(headers?: Record<string, string[]>) {
   if (!headers || Object.keys(headers).length === 0) return '';
-  return JSON.stringify(headers, null, 2);
+  return Object.entries(headers)
+    .flatMap(([key, values]) => values.length > 0 ? values.map((value) => `${key}: ${value}`) : [`${key}:`])
+    .join('\n');
 }
 
-function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: string; copyLabel: string }) {
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(contentText).join('');
+  if (!isObject(value)) return '';
+  if (typeof value.text === 'string') return value.text;
+  return contentText(value.content);
+}
+
+function completedResponseText(payload: Record<string, unknown>): string {
+  const response = isObject(payload.response) ? payload.response : payload;
+  if (typeof response.output_text === 'string') return response.output_text;
+  if (!Array.isArray(response.output)) return '';
+  return response.output.map((item) => {
+    if (!isObject(item) || !Array.isArray(item.content)) return '';
+    return item.content.map(contentText).join('');
+  }).join('');
+}
+
+function streamedResponseText(body?: string): string {
+  if (!body) return '';
+  const deltas: string[] = [];
+  const completed: string[] = [];
+
+  for (const line of body.split(/\r?\n/)) {
+    const match = /^data:\s?(.*)$/.exec(line.trim());
+    if (!match || !match[1] || match[1] === '[DONE]') continue;
+    try {
+      const payload: unknown = JSON.parse(match[1]);
+      if (!isObject(payload)) continue;
+      if (payload.type === 'response.output_text.delta' && typeof payload.delta === 'string') {
+        deltas.push(payload.delta);
+        continue;
+      }
+      if (Array.isArray(payload.choices)) {
+        for (const choice of payload.choices) {
+          if (!isObject(choice) || !isObject(choice.delta)) continue;
+          const text = contentText(choice.delta.content);
+          if (text) deltas.push(text);
+        }
+        continue;
+      }
+      const text = completedResponseText(payload);
+      if (text) completed.push(text);
+    } catch {
+      // Ignore keep-alives and non-JSON SSE events; raw mode still exposes them.
+    }
+  }
+
+  return deltas.join('') || completed[completed.length - 1] || '';
+}
+
+function TextViewer({ content, copyContent, emptyText, copyLabel, controls }: { content?: string; copyContent?: string; emptyText: string; copyLabel: string; controls?: ReactNode }) {
   const [copied, setCopied] = useState(false);
-  const formatted = useMemo(() => readableBody(body), [body]);
   const { showToast } = useToast();
 
   const copy = async () => {
-    if (!body) return;
+    const value = copyContent ?? content;
+    if (!value) return;
     try {
-      await copyText(body);
+      await copyText(value);
       setCopied(true);
       showToast('success', '复制成功', `${copyLabel.replace('复制', '')}已复制到剪贴板`);
       window.setTimeout(() => setCopied(false), 1600);
@@ -116,7 +174,7 @@ function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: 
     }
   };
 
-  if (!body) {
+  if (!content) {
     return (
       <div className="flex min-h-72 flex-col items-center justify-center border-y border-zinc-200 bg-zinc-50 px-6 text-center">
         <FileJson size={24} className="text-zinc-300" />
@@ -128,16 +186,43 @@ function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: 
   return (
     <div className="overflow-hidden border-y border-zinc-800 bg-zinc-950">
       <div className="flex h-11 items-center justify-between border-b border-white/10 px-4">
-        <span className="text-xs font-medium text-zinc-400">{body.length.toLocaleString()} 字符</span>
-        <Tooltip content={copied ? '已复制' : copyLabel}>
-          <Button isIconOnly aria-label={copyLabel} className="text-zinc-400 data-[hover=true]:bg-white/10 data-[hover=true]:text-white" radius="sm" size="sm" variant="light" onPress={() => void copy()}>
-            {copied ? <Check size={16} /> : <Clipboard size={16} />}
-          </Button>
-        </Tooltip>
+        <span className="text-xs font-medium text-zinc-400">{content.length.toLocaleString()} 字符</span>
+        <div className="flex items-center gap-2">
+          {controls}
+          <Tooltip content={copied ? '已复制' : copyLabel}>
+            <Button isIconOnly aria-label={copyLabel} className="text-zinc-400 data-[hover=true]:bg-white/10 data-[hover=true]:text-white" radius="sm" size="sm" variant="light" onPress={() => void copy()}>
+              {copied ? <Check size={16} /> : <Clipboard size={16} />}
+            </Button>
+          </Tooltip>
+        </div>
       </div>
-      <pre className="max-h-[52vh] min-h-72 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-zinc-200">{formatted}</pre>
+      <pre className="max-h-[52vh] min-h-72 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-zinc-200">{content}</pre>
     </div>
   );
+}
+
+function BodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: string; copyLabel: string }) {
+  const formatted = useMemo(() => readableBody(body), [body]);
+  return <TextViewer content={formatted} copyContent={body} copyLabel={copyLabel} emptyText={emptyText} />;
+}
+
+function HeaderViewer({ headers, emptyText, copyLabel }: { headers?: Record<string, string[]>; emptyText: string; copyLabel: string }) {
+  const formatted = useMemo(() => formattedHeaders(headers), [headers]);
+  return <TextViewer content={formatted} copyLabel={copyLabel} emptyText={emptyText} />;
+}
+
+function StreamBodyViewer({ body, emptyText, copyLabel }: { body?: string; emptyText: string; copyLabel: string }) {
+  const [raw, setRaw] = useState(false);
+  const formatted = useMemo(() => streamedResponseText(body), [body]);
+  useEffect(() => setRaw(false), [body]);
+  const content = raw ? body : (formatted || body);
+  const controls = (
+    <ButtonGroup aria-label="响应内容显示方式" radius="sm" size="sm" variant="flat">
+      <Button color={!raw ? 'primary' : 'default'} variant={!raw ? 'solid' : 'flat'} onPress={() => setRaw(false)}>格式化</Button>
+      <Button color={raw ? 'primary' : 'default'} variant={raw ? 'solid' : 'flat'} onPress={() => setRaw(true)}>原始</Button>
+    </ButtonGroup>
+  );
+  return <TextViewer content={content} copyLabel={copyLabel} controls={controls} emptyText={emptyText} />;
 }
 
 export default function AuditPage() {
@@ -327,9 +412,9 @@ export default function AuditPage() {
                 {detail.error ? <div className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-5 py-3 text-xs text-red-700"><AlertCircle className="mt-0.5 shrink-0" size={14} /><span className="break-all">{detail.error}</span></div> : null}
                 <Tabs aria-label="请求和响应详情" classNames={{ base: 'px-5 pt-3', panel: 'p-0 pt-3' }} color="primary" variant="underlined">
                   <Tab key="request" title="请求内容"><BodyViewer body={detail.request_body} copyLabel="复制请求内容" emptyText="此历史记录未保存请求正文" /></Tab>
-                  <Tab key="request-headers" title="请求 Header"><BodyViewer body={serializedHeaders(detail.request_headers)} copyLabel="复制请求 Header" emptyText="此历史记录未保存请求 Header" /></Tab>
-                  <Tab key="response" title="响应内容"><BodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" /></Tab>
-                  <Tab key="response-headers" title="响应 Header"><BodyViewer body={serializedHeaders(detail.response_headers)} copyLabel="复制响应 Header" emptyText="此历史记录未保存响应 Header" /></Tab>
+                  <Tab key="request-headers" title="请求 Header"><HeaderViewer headers={detail.request_headers} copyLabel="复制请求 Header" emptyText="此历史记录未保存请求 Header" /></Tab>
+                  <Tab key="response" title="响应内容">{detail.streaming ? <StreamBodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" /> : <BodyViewer body={detail.response_body} copyLabel="复制响应内容" emptyText="此历史记录未保存响应正文" />}</Tab>
+                  <Tab key="response-headers" title="响应 Header"><HeaderViewer headers={detail.response_headers} copyLabel="复制响应 Header" emptyText="此历史记录未保存响应 Header" /></Tab>
                 </Tabs>
               </>
             ) : null}

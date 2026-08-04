@@ -115,8 +115,14 @@ func TestProxySanitizesUpstreamErrorAndKeepsAuditDetail(t *testing.T) {
 	if requestID == "" || record.ID != requestID || upstreamRequestID != requestID {
 		t.Fatalf("request ids = response %q, audit %q, upstream %q", requestID, record.ID, upstreamRequestID)
 	}
-	if record.RequestBody != "" || len(record.RequestHeaders) != 0 {
-		t.Fatalf("request details were recorded while debug was disabled: %#v", record)
+	if record.RequestBody != "" {
+		t.Fatalf("request body was recorded while debug was disabled: %#v", record)
+	}
+	if got := record.RequestHeaders["Authorization"]; len(got) != 1 || got[0] != "[REDACTED]" {
+		t.Fatalf("request Authorization = %#v", got)
+	}
+	if got := record.RequestHeaders["Accept"]; len(got) != 1 || got[0] != "application/json" {
+		t.Fatalf("request Accept = %#v", got)
 	}
 	expectedMessage := "status_code=429,upstream request failed. request_id=" + requestID
 	if record.ResponseBody != response.Body.String() || !strings.Contains(response.Body.String(), expectedMessage) {
@@ -137,6 +143,45 @@ func TestProxySanitizesUpstreamErrorAndKeepsAuditDetail(t *testing.T) {
 	data := storedUsageData(t, store)
 	if bytes.Contains(data, []byte("error-session=secret")) {
 		t.Fatal("usage log contains upstream Set-Cookie value")
+	}
+}
+
+func TestProxyLocalFailureKeepsSanitizedAuditDetails(t *testing.T) {
+	config, store := newTestStore(t)
+	proxy := NewProxy(config, store, NewModelRouter(store), nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	request.Header.Set("X-Client-Trace", "trace-123")
+	response := httptest.NewRecorder()
+
+	proxy.HandleRequest(response, request, APIKey{ID: "key_failure"})
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	records := store.UsageRecords()
+	if len(records) != 1 {
+		t.Fatalf("usage records = %#v", records)
+	}
+	record := records[0]
+	if record.RequestBody != "" {
+		t.Fatalf("request body was recorded while debug was disabled: %q", record.RequestBody)
+	}
+	if got := record.RequestHeaders["Authorization"]; len(got) != 1 || got[0] != "[REDACTED]" {
+		t.Fatalf("request Authorization = %#v", got)
+	}
+	if got := record.RequestHeaders["X-Client-Trace"]; len(got) != 1 || got[0] != "trace-123" {
+		t.Fatalf("request trace = %#v", got)
+	}
+	if record.ResponseBody != response.Body.String() || !strings.Contains(record.ResponseBody, "request body must be a JSON object") {
+		t.Fatalf("response body = %q", record.ResponseBody)
+	}
+	if got := record.ResponseHeaders["Content-Type"]; len(got) != 1 || got[0] != "application/json; charset=utf-8" {
+		t.Fatalf("response Content-Type = %#v", got)
+	}
+	data := storedUsageData(t, store)
+	if bytes.Contains(data, []byte("client-secret")) {
+		t.Fatal("usage log contains client authorization secret")
 	}
 }
 

@@ -63,6 +63,9 @@ func (w *auditResponseWriter) WriteHeader(status int) {
 		return
 	}
 	w.status = status
+	if status >= http.StatusBadRequest {
+		w.captureBody = true
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 
@@ -150,10 +153,14 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		if audit.Status == 0 {
 			audit.Status = http.StatusInternalServerError
 		}
+		failed := audit.Status >= http.StatusBadRequest
+		if (debugEnabled || failed) && len(audit.RequestHeaders) == 0 {
+			audit.RequestHeaders = auditHeaders(r.Header)
+		}
 		if captured.captureBody {
 			audit.ResponseBody = captured.body.String()
 		}
-		if debugEnabled && len(audit.ResponseHeaders) == 0 {
+		if (debugEnabled || failed) && len(audit.ResponseHeaders) == 0 {
 			audit.ResponseHeaders = auditHeaders(captured.Header())
 		}
 		p.record(audit)
@@ -244,12 +251,15 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 	}
 	request, response, err := p.doUpstreamRequest(requestContext, route, requestPath, requestBody, streaming, requestID)
 	if err != nil {
+		if request != nil {
+			audit.RequestHeaders = auditHeaders(request.Header)
+		}
 		audit.Error = err.Error()
 		writeOpenAIError(w, http.StatusBadGateway, upstreamRequestErrorCode(err), upstreamFailureMessage(http.StatusBadGateway, requestID))
 		return
 	}
 	defer response.Body.Close()
-	if debugEnabled {
+	if debugEnabled || response.StatusCode >= http.StatusBadRequest {
 		audit.RequestHeaders = auditHeaders(request.Header)
 	}
 	if debugEnabled || response.StatusCode != http.StatusOK {
