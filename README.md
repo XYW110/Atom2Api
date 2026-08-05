@@ -26,6 +26,7 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 - OpenAI-compatible endpoints: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/completions`, and `/v1/embeddings`
 - Streaming proxy: forwards SSE in real time, automatically requests `include_usage`, and records input, output, cached, and reasoning tokens
 - Multi-account routing: skips disabled or quota-exhausted accounts and distributes requests across available accounts in round-robin order
+- Account credential migration: exports an OAuth credential bundle from Accounts and imports it on another device before synchronizing the account
 - API keys: stores SHA-256 digests only and supports model allowlists, revocation, restoration, and expiration
 - Management security: bcrypt password hashing, HttpOnly and SameSite sessions, login rate limiting, and AES-256-GCM encryption for stored OAuth tokens
 - Dashboard: request trends, request counts, input/output tokens, success rate, latency, model distribution, and recent requests
@@ -84,8 +85,11 @@ Open `http://localhost:8080` after the container starts. Data is stored in the l
 1. Sign in to the console and open **Accounts**.
 2. Select **Connect AtomGit** and complete OAuth authorization on the page that opens.
 3. Atom2Api automatically claims or synchronizes the Coding Plan, quota, and available models.
-4. Open **API Keys** and create an API key for external clients. The plaintext key is displayed only once.
-5. Set the client's base URL to `http://localhost:8080/v1` and use the newly created `sk-atom2-*` API key.
+4. To move an account to another device, export the credential JSON from Accounts and import it on the target device; the account is matched by user ID and synchronized again.
+5. Open **API Keys** and create an API key for external clients. The plaintext key is displayed only once.
+6. Set the client's base URL to `http://localhost:8080/v1` and use the newly created `sk-atom2-*` API key.
+
+The exported credential file contains OAuth access tokens. Transfer it only through a secure channel, protect it like a password, and delete temporary copies after import.
 
 Python SDK example:
 

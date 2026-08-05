@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Eye, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Activity, AlertCircle, ArrowLeft, Check, CheckCircle2, Copy, Download, ExternalLink, Eye, FileWarning, Gift, History, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Upload, Users } from 'lucide-react';
 import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Pagination, Progress, Skeleton, Switch, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Textarea, Tooltip, useDisclosure } from '@heroui/react';
 import { copyText } from '../clipboard';
 import { EmptyState, PageShell } from '../components/PageShell';
 import { useToast } from '../components/Toast';
-import { apiFetch, type Account, type AccountProtocolProbeResult, type PlanClaimLog, type PlanClaimResult, type ProtocolProbeResult, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
+import { apiFetch, type Account, type AccountCredentialImportResponse, type AccountProtocolProbeResult, type PlanClaimLog, type PlanClaimResult, type ProtocolProbeResult, errorMessage, formatDateTime, formatTokens, jsonRequest } from '../api';
 
 const statusMeta = {
   active: { label: '运行中', color: 'success' as const },
@@ -137,6 +137,7 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const importInput = useRef<HTMLInputElement>(null);
   const [oauth, setOAuth] = useState<OAuthState | null>(null);
   const [oauthCopied, setOAuthCopied] = useState(false);
   const [deleting, setDeleting] = useState<Account | null>(null);
@@ -341,6 +342,68 @@ export default function AccountsPage() {
     }
   };
 
+  const exportCredentials = async () => {
+    setBusy('export');
+    try {
+      const response = await fetch('/api/accounts/export', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+      if (!response.ok) {
+        let message = `导出失败 (${response.status})`;
+        try {
+          const body = await response.json() as { error?: string; message?: string };
+          message = body.error || body.message || message;
+        } catch {
+          // Keep the status-based fallback.
+        }
+        if (response.status === 401) window.dispatchEvent(new Event('atom2api:unauthorized'));
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'atom2api-credentials-v1.json';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      showToast('success', '导出成功', `${accounts.length} 个账号凭据已下载，请妥善保管文件`);
+    } catch (requestError) {
+      showToast('error', '导出失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const importCredentials = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      showToast('error', '导入失败', '凭据文件不能超过 4 MB');
+      return;
+    }
+    setBusy('import');
+    try {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(await file.text());
+      } catch {
+        throw new Error('凭据文件不是有效的 JSON');
+      }
+      const result = await apiFetch<AccountCredentialImportResponse>('/api/accounts/import', jsonRequest('POST', payload));
+      await load();
+      if (result.errors?.length) {
+        showToast('error', '导入部分完成', `${result.imported} 个账号成功，${result.errors.length} 个账号失败；请检查文件后重试`);
+      } else {
+        showToast('success', '导入成功', `${result.imported} 个账号凭据已保存并同步`);
+      }
+    } catch (requestError) {
+      showToast('error', '导入失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const runBatchAction = async (action: 'claim' | 'sync') => {
     if (accounts.length === 0) return;
     const actionLabel = action === 'claim' ? '领取 Plan' : '同步额度';
@@ -445,6 +508,15 @@ export default function AccountsPage() {
   return (
     <PageShell title="账号管理" description="AtomGit OAuth 账户、Coding Plan 权益与滚动额度" action={{ label: '连接 AtomGit', icon: Plus, onPress: () => void startOAuth() }}>
       {error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{error}</div> : null}
+
+      <section className="flex flex-col gap-4 rounded-lg border border-amber-200 bg-amber-50/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3"><FileWarning className="mt-0.5 shrink-0 text-amber-600" size={18} /><div><p className="text-sm font-medium text-amber-900">跨设备凭据</p><p className="mt-1 text-xs leading-5 text-amber-800">导出文件包含 OAuth 访问令牌，请像密码一样保管；导入会按用户 ID 更新现有账号。</p></div></div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <input ref={importInput} accept=".json,application/json" aria-label="选择凭据文件" className="hidden" type="file" onChange={(event) => void importCredentials(event)} />
+          <Button isDisabled={Boolean(busy) || loading} isLoading={busy === 'export'} radius="sm" size="sm" startContent={busy === 'export' ? null : <Download size={15} />} variant="bordered" onPress={() => void exportCredentials()}>导出凭据</Button>
+          <Button color="primary" isDisabled={Boolean(busy) || loading} isLoading={busy === 'import'} radius="sm" size="sm" startContent={busy === 'import' ? null : <Upload size={15} />} onPress={() => importInput.current?.click()}>导入凭据</Button>
+        </div>
+      </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border border-zinc-200 bg-white px-5 py-4"><p className="text-xs text-zinc-500">已连接账号</p><p className="mt-1 text-xl font-semibold text-zinc-900">{accounts.length}</p></div>

@@ -37,6 +37,132 @@ func (a *API) HandleAccounts(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": a.store.Accounts()})
 }
 
+const (
+	accountCredentialBundleVersion = 1
+	maxAccountCredentialBundleSize = 4 << 20
+	maxImportedAccounts            = 100
+)
+
+type accountCredentialBundle struct {
+	Version    int                           `json:"version"`
+	ExportedAt time.Time                     `json:"exported_at"`
+	Accounts   []accountCredentialBundleItem `json:"accounts"`
+}
+
+type accountCredentialBundleItem struct {
+	Name        string           `json:"name"`
+	Note        string           `json:"note,omitempty"`
+	Enabled     bool             `json:"enabled"`
+	User        UserInfo         `json:"user"`
+	Credentials OAuthCredentials `json:"credentials"`
+}
+
+type accountCredentialImportError struct {
+	Name   string `json:"name,omitempty"`
+	UserID string `json:"user_id,omitempty"`
+	Error  string `json:"error"`
+}
+
+type accountCredentialImportResponse struct {
+	Data     []AccountView                  `json:"data"`
+	Imported int                            `json:"imported"`
+	Errors   []accountCredentialImportError `json:"errors,omitempty"`
+}
+
+func (a *API) HandleAccountCredentialExport(w http.ResponseWriter, _ *http.Request) {
+	bundle := accountCredentialBundle{
+		Version:    accountCredentialBundleVersion,
+		ExportedAt: time.Now().UTC(),
+		Accounts:   make([]accountCredentialBundleItem, 0),
+	}
+	for _, view := range a.store.Accounts() {
+		account, accessToken, refreshToken, err := a.store.Account(view.ID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "无法读取账号凭据"})
+			return
+		}
+		account.Credentials.AccessToken = accessToken
+		account.Credentials.RefreshToken = refreshToken
+		bundle.Accounts = append(bundle.Accounts, accountCredentialBundleItem{
+			Name: account.Name, Note: account.Note, Enabled: account.Enabled, User: account.User, Credentials: account.Credentials,
+		})
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `attachment; filename="atom2api-credentials-v1.json"`)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(bundle); err != nil {
+		return
+	}
+}
+
+func (a *API) HandleAccountCredentialImport(w http.ResponseWriter, r *http.Request) {
+	var bundle accountCredentialBundle
+	if !decodeJSONBody(w, r, &bundle, maxAccountCredentialBundleSize) {
+		return
+	}
+	if bundle.Version != accountCredentialBundleVersion {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "不支持的凭据包版本"})
+		return
+	}
+	if len(bundle.Accounts) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "凭据包不包含账号"})
+		return
+	}
+	if len(bundle.Accounts) > maxImportedAccounts {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("凭据包最多包含 %d 个账号", maxImportedAccounts)})
+		return
+	}
+	result := accountCredentialImportResponse{Data: make([]AccountView, 0, len(bundle.Accounts))}
+	seenUsers := make(map[string]struct{}, len(bundle.Accounts))
+	for _, item := range bundle.Accounts {
+		item.Name = strings.TrimSpace(item.Name)
+		item.Note = strings.TrimSpace(item.Note)
+		item.User.ID = strings.TrimSpace(item.User.ID)
+		item.User.Username = strings.TrimSpace(item.User.Username)
+		item.Credentials.AccessToken = strings.TrimSpace(item.Credentials.AccessToken)
+		item.Credentials.RefreshToken = strings.TrimSpace(item.Credentials.RefreshToken)
+		if item.User.ID == "" || item.Credentials.AccessToken == "" {
+			result.Errors = append(result.Errors, accountCredentialImportError{Name: item.Name, UserID: item.User.ID, Error: "缺少用户 ID 或访问令牌"})
+			continue
+		}
+		if _, exists := seenUsers[item.User.ID]; exists {
+			result.Errors = append(result.Errors, accountCredentialImportError{Name: item.Name, UserID: item.User.ID, Error: "凭据包中存在重复账号"})
+			continue
+		}
+		seenUsers[item.User.ID] = struct{}{}
+		account := Account{
+			Name: item.Name, Note: item.Note, Status: "syncing", Enabled: item.Enabled, User: item.User,
+			Credentials: item.Credentials,
+		}
+		view, err := a.store.ImportAccountCredentials(account, item.Credentials.AccessToken, item.Credentials.RefreshToken)
+		if err != nil {
+			result.Errors = append(result.Errors, accountCredentialImportError{Name: item.Name, UserID: item.User.ID, Error: "保存凭据失败"})
+			continue
+		}
+		if a.codingPlan != nil {
+			synced, syncErr := a.codingPlan.Sync(r.Context(), view.ID)
+			if syncErr != nil {
+				view, _ = a.store.UpdateAccount(view.ID, func(stored *Account) error {
+					stored.Status = "error"
+					stored.LastError = syncErr.Error()
+					return nil
+				})
+				result.Errors = append(result.Errors, accountCredentialImportError{Name: item.Name, UserID: item.User.ID, Error: "凭据已保存，但账号同步失败"})
+			} else {
+				view = synced
+			}
+		} else {
+			view, _ = a.store.UpdateAccount(view.ID, func(stored *Account) error {
+				stored.Status = "active"
+				return nil
+			})
+		}
+		result.Data = append(result.Data, view)
+		result.Imported++
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *API) HandleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Name          *string            `json:"name"`

@@ -26,6 +26,7 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 - OpenAI 兼容端点：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/completions`、`/v1/embeddings`
 - 流式代理：SSE 即时转发，自动请求 `include_usage`，记录输入、输出、缓存和推理 tokens
 - 多账号路由：跳过停用或额度耗尽账号，在可用账号之间轮询
+- 账号凭据迁移：从账号管理导出 OAuth 凭据包，在另一台设备导入并自动同步账号
 - API Key：仅保存 SHA-256 摘要，支持模型白名单、撤销、恢复和过期时间
 - 管理安全：bcrypt 密码哈希、HttpOnly + SameSite 会话、登录限速、OAuth token AES-256-GCM 加密落盘
 - 仪表盘：请求趋势、请求数、输入/输出 tokens、成功率、延迟、模型分布和最近请求
@@ -84,8 +85,11 @@ docker compose up -d
 1. 登录控制台，进入“账号管理”。
 2. 点击“连接 AtomGit”，在新页面完成 OAuth 授权。
 3. Atom2Api 自动领取或同步 Coding Plan、额度和可用模型。
-4. 进入“密钥管理”创建外部 API Key；密钥明文只显示一次。
-5. 将客户端的 Base URL 设为 `http://localhost:8080/v1`，API Key 使用刚创建的 `sk-atom2-*`。
+4. 如需迁移到另一台设备，在账号管理导出凭据 JSON 文件，并在目标设备导入；导入后会按用户 ID 更新账号并重新同步。
+5. 进入“密钥管理”创建外部 API Key；密钥明文只显示一次。
+6. 将客户端的 Base URL 设为 `http://localhost:8080/v1`，API Key 使用刚创建的 `sk-atom2-*`。
+
+导出的凭据文件包含 OAuth 访问令牌，只应通过安全渠道传输并像密码一样保管；导入完成后建议立即删除临时文件。
 
 Python SDK 示例：
 

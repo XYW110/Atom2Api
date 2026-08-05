@@ -225,6 +225,12 @@ export interface DashboardResponse {
   }> | null;
 }
 
+export interface AccountCredentialImportResponse {
+  data: Account[];
+  imported: number;
+  errors?: Array<{ name?: string; user_id?: string; error: string }>;
+}
+
 export interface AuditRecordSummary {
   id: string;
   timestamp: string;

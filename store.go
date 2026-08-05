@@ -468,6 +468,74 @@ func (s *Store) UpsertAccount(account Account, accessToken, refreshToken string)
 	return s.state.Accounts[index].View(), nil
 }
 
+func (s *Store) ImportAccountCredentials(account Account, accessToken, refreshToken string) (AccountView, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" || strings.TrimSpace(account.User.ID) == "" {
+		return AccountView{}, errors.New("account credentials require access token and user id")
+	}
+	encryptedAccess, err := s.encrypt(accessToken)
+	if err != nil {
+		return AccountView{}, err
+	}
+	encryptedRefresh, err := s.encrypt(strings.TrimSpace(refreshToken))
+	if err != nil {
+		return AccountView{}, err
+	}
+	now := time.Now().UTC()
+	if account.Credentials.TokenType == "" {
+		account.Credentials.TokenType = "Bearer"
+	}
+	if account.Credentials.CreatedAt.IsZero() {
+		account.Credentials.CreatedAt = now
+	}
+	if strings.TrimSpace(account.Name) == "" {
+		account.Name = account.User.Name
+		if account.Name == "" {
+			account.Name = account.User.Username
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.state.Accounts {
+		existing := &s.state.Accounts[index]
+		if existing.User.ID != account.User.ID {
+			continue
+		}
+		existing.Credentials.AccessToken = encryptedAccess
+		if encryptedRefresh != "" {
+			existing.Credentials.RefreshToken = encryptedRefresh
+		}
+		existing.Credentials.TokenType = account.Credentials.TokenType
+		existing.Credentials.ExpiresIn = account.Credentials.ExpiresIn
+		existing.Credentials.CreatedAt = account.Credentials.CreatedAt
+		existing.User = account.User
+		existing.Name = strings.TrimSpace(account.Name)
+		existing.Note = strings.TrimSpace(account.Note)
+		existing.Enabled = account.Enabled
+		existing.Status = "syncing"
+		existing.LastError = ""
+		existing.UpdatedAt = now
+		if err := s.saveLocked(); err != nil {
+			return AccountView{}, err
+		}
+		return existing.View(), nil
+	}
+
+	account.ID = randomID("acc")
+	account.Status = "syncing"
+	account.Credentials.AccessToken = encryptedAccess
+	account.Credentials.RefreshToken = encryptedRefresh
+	account.UpdatedAt = now
+	account.CreatedAt = now
+	claimSchedule := defaultPlanClaimSchedule()
+	account.ClaimSchedule = &claimSchedule
+	s.state.Accounts = append(s.state.Accounts, account)
+	if err := s.saveLocked(); err != nil {
+		return AccountView{}, err
+	}
+	return account.View(), nil
+}
+
 func (s *Store) Accounts() []AccountView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
