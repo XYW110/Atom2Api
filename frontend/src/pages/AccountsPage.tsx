@@ -521,6 +521,7 @@ export default function AccountsPage() {
 
   const activeCount = accounts.filter((account) => account.enabled && account.status === 'active').length;
   const availableConversations = accounts.reduce((sum, account) => {
+    if (account.status !== 'active') return sum;
     const window = currentRateLimitWindow(account);
     return sum + (window ? Math.max(0, window.call_limit - window.calls_used) : 0);
   }, 0);
