@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +45,24 @@ func TestAccountCredentialBundleRoundTrip(t *testing.T) {
 		t.Fatal("export exposed the local encrypted credential")
 	}
 
+	singleExportRequest := httptest.NewRequest(http.MethodGet, "/api/accounts/"+view.ID+"/export", nil)
+	singleExportRequest.SetPathValue("id", view.ID)
+	singleExportResponse := httptest.NewRecorder()
+	(&API{store: source}).HandleAccountCredentialExport(singleExportResponse, singleExportRequest)
+	if singleExportResponse.Code != http.StatusOK {
+		t.Fatalf("single export status = %d, body = %s", singleExportResponse.Code, singleExportResponse.Body.String())
+	}
+	if want := `atom2api-credentials-` + view.ID + `-v1.json`; !strings.Contains(singleExportResponse.Header().Get("Content-Disposition"), want) {
+		t.Fatalf("single export filename = %q, want to contain %q", singleExportResponse.Header().Get("Content-Disposition"), want)
+	}
+	var singleBundle accountCredentialBundle
+	if err := json.Unmarshal(singleExportResponse.Body.Bytes(), &singleBundle); err != nil {
+		t.Fatalf("decode single export: %v", err)
+	}
+	if len(singleBundle.Accounts) != 1 || singleBundle.Accounts[0].User.ID != "user-export" {
+		t.Fatalf("single export bundle = %#v", singleBundle)
+	}
+
 	_, target := newTestStore(t)
 	importResponse := httptest.NewRecorder()
 	(&API{store: target}).HandleAccountCredentialImport(importResponse, httptest.NewRequest(http.MethodPost, "/api/accounts/import", bytes.NewReader(exportResponse.Body.Bytes())))
@@ -79,6 +98,17 @@ func TestAccountCredentialBundleRoundTrip(t *testing.T) {
 	updated, _, _, err := target.Account(imported.ID)
 	if err != nil || updated.RequestCount != 12 {
 		t.Fatalf("duplicate import changed usage: account=%#v err=%v", updated, err)
+	}
+}
+
+func TestAccountCredentialExportRejectsUnknownAccount(t *testing.T) {
+	_, store := newTestStore(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/accounts/unknown/export", nil)
+	request.SetPathValue("id", "unknown")
+	response := httptest.NewRecorder()
+	(&API{store: store}).HandleAccountCredentialExport(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 

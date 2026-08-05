@@ -342,10 +342,12 @@ export default function AccountsPage() {
     }
   };
 
-  const exportCredentials = async () => {
-    setBusy('export');
+  const exportCredentials = async (account?: Account) => {
+    const exportBusyKey = account ? `export:${account.id}` : 'export';
+    setBusy(exportBusyKey);
     try {
-      const response = await fetch('/api/accounts/export', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+      const exportPath = account ? `/api/accounts/${encodeURIComponent(account.id)}/export` : '/api/accounts/export';
+      const response = await fetch(exportPath, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
       if (!response.ok) {
         let message = `导出失败 (${response.status})`;
         try {
@@ -361,12 +363,12 @@ export default function AccountsPage() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = 'atom2api-credentials-v1.json';
+      anchor.download = account ? `atom2api-credentials-${account.id}-v1.json` : 'atom2api-credentials-v1.json';
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      showToast('success', '导出成功', `${accounts.length} 个账号凭据已下载，请妥善保管文件`);
+      showToast('success', '导出成功', account ? `“${account.name}”的凭据已下载，请妥善保管文件` : `${accounts.length} 个账号凭据已下载，请妥善保管文件`);
     } catch (requestError) {
       showToast('error', '导出失败', errorMessage(requestError, '请稍后重试'));
     } finally {
@@ -375,20 +377,40 @@ export default function AccountsPage() {
   };
 
   const importCredentials = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      showToast('error', '导入失败', '凭据文件不能超过 4 MB');
+    if (files.length === 0) return;
+    const maxBundleSize = 4 * 1024 * 1024;
+    const totalSize = files.reduce((size, file) => size + file.size, 0);
+    if (totalSize > maxBundleSize) {
+      showToast('error', '导入失败', '所选凭据文件合计不能超过 4 MB');
       return;
     }
     setBusy('import');
     try {
-      let payload: unknown;
-      try {
-        payload = JSON.parse(await file.text());
-      } catch {
-        throw new Error('凭据文件不是有效的 JSON');
+      const bundles = await Promise.all(files.map(async (file) => {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(await file.text());
+        } catch {
+          throw new Error(`“${file.name}”不是有效的 JSON`);
+        }
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new Error(`“${file.name}”不是有效的凭据包`);
+        }
+        const bundle = payload as { version?: unknown; accounts?: unknown };
+        if (bundle.version !== 1 || !Array.isArray(bundle.accounts)) {
+          throw new Error(`“${file.name}”不是受支持的凭据包`);
+        }
+        return bundle;
+      }));
+      const accountsToImport = bundles.flatMap((bundle) => bundle.accounts || []);
+      if (accountsToImport.length === 0) {
+        throw new Error('所选凭据包不包含账号');
+      }
+      const payload = { version: 1, exported_at: new Date().toISOString(), accounts: accountsToImport };
+      if (new TextEncoder().encode(JSON.stringify(payload)).length > maxBundleSize) {
+        throw new Error('合并后的凭据包不能超过 4 MB');
       }
       const result = await apiFetch<AccountCredentialImportResponse>('/api/accounts/import', jsonRequest('POST', payload));
       await load();
@@ -510,11 +532,11 @@ export default function AccountsPage() {
       {error ? <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 shrink-0" size={16} />{error}</div> : null}
 
       <section className="flex flex-col gap-4 rounded-lg border border-amber-200 bg-amber-50/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3"><FileWarning className="mt-0.5 shrink-0 text-amber-600" size={18} /><div><p className="text-sm font-medium text-amber-900">跨设备凭据</p><p className="mt-1 text-xs leading-5 text-amber-800">导出文件包含 OAuth 访问令牌，请像密码一样保管；导入会按用户 ID 更新现有账号。</p></div></div>
+        <div className="flex items-start gap-3"><FileWarning className="mt-0.5 shrink-0 text-amber-600" size={18} /><div><p className="text-sm font-medium text-amber-900">跨设备凭据</p><p className="mt-1 text-xs leading-5 text-amber-800">导出文件包含 OAuth 访问令牌，请像密码一样保管；导入会按用户 ID 更新现有账号，支持多选文件统一导入。</p></div></div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <input ref={importInput} accept=".json,application/json" aria-label="选择凭据文件" className="hidden" type="file" onChange={(event) => void importCredentials(event)} />
+          <input ref={importInput} accept=".json,application/json" aria-label="选择凭据文件" className="hidden" multiple type="file" onChange={(event) => void importCredentials(event)} />
           <Button isDisabled={Boolean(busy) || loading} isLoading={busy === 'export'} radius="sm" size="sm" startContent={busy === 'export' ? null : <Download size={15} />} variant="bordered" onPress={() => void exportCredentials()}>导出凭据</Button>
-          <Button color="primary" isDisabled={Boolean(busy) || loading} isLoading={busy === 'import'} radius="sm" size="sm" startContent={busy === 'import' ? null : <Upload size={15} />} onPress={() => importInput.current?.click()}>导入凭据</Button>
+          <Button color="primary" isDisabled={Boolean(busy) || loading} isLoading={busy === 'import'} radius="sm" size="sm" startContent={busy === 'import' ? null : <Upload size={15} />} onPress={() => importInput.current?.click()}>导入凭据（可多选）</Button>
         </div>
       </section>
 
@@ -545,7 +567,7 @@ export default function AccountsPage() {
                       <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(account.last_sync_at)}</span></TableCell>
                       <TableCell><div className="min-w-28"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${account.plan_claim_schedule.enabled ? 'bg-emerald-500' : 'bg-zinc-300'}`} /><span className="text-xs text-zinc-600">{account.plan_claim_schedule.enabled ? '已启用' : '已停用'}</span></div><code className="mt-1 block whitespace-nowrap font-mono text-[11px] text-zinc-400">{account.plan_claim_schedule.cron}</code></div></TableCell>
                       <TableCell><Tooltip content={account.last_error || status.label}><Chip color={status.color} radius="sm" size="sm" variant="flat">{status.label}</Chip></Tooltip></TableCell>
-                      <TableCell><div className="flex min-w-64 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isDisabled={batchBusy} isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="探测 Chat 与 Responses 协议"><Button isIconOnly aria-label="探测模型协议" color="secondary" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => openProtocolProbe(account)}><Activity size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isDisabled={batchBusy} isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isDisabled={batchBusy} isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isDisabled={batchBusy} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
+                      <TableCell><div className="flex min-w-72 justify-end gap-1"><Tooltip content="编辑账号与领取计划"><Button isIconOnly aria-label="编辑账号" isDisabled={batchBusy} isLoading={busy === `edit:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => openEdit(account)}><Pencil size={16} /></Button></Tooltip><Tooltip content="探测 Chat 与 Responses 协议"><Button isIconOnly aria-label="探测模型协议" color="secondary" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => openProtocolProbe(account)}><Activity size={16} /></Button></Tooltip><Tooltip content="立即领取 Coding Plan"><Button isIconOnly aria-label="立即领取 Coding Plan" color="primary" isDisabled={batchBusy} isLoading={busy === `claim:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void claimAccount(account)}><Gift size={16} /></Button></Tooltip><Tooltip content="领取记录"><Button isIconOnly aria-label="查看领取记录" radius="sm" size="sm" variant="light" onPress={() => void openClaimLogs(account)}><History size={16} /></Button></Tooltip><Tooltip content="同步额度与模型"><Button isIconOnly aria-label="同步账号" isDisabled={batchBusy} isLoading={busy === `sync:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void syncAccount(account)}><RefreshCw size={16} /></Button></Tooltip><Tooltip content={account.enabled ? '暂停调度' : '恢复调度'}><Button isIconOnly aria-label={account.enabled ? '暂停账号' : '恢复账号'} isDisabled={batchBusy} isLoading={busy === `toggle:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void toggleAccount(account)}>{account.enabled ? <Pause size={16} /> : <Play size={16} />}</Button></Tooltip><Tooltip content="导出此账号凭据"><Button isIconOnly aria-label="导出此账号凭据" isDisabled={Boolean(busy)} isLoading={busy === `export:${account.id}`} radius="sm" size="sm" variant="light" onPress={() => void exportCredentials(account)}><Download size={16} /></Button></Tooltip><Tooltip color="danger" content="删除账号"><Button isIconOnly aria-label="删除账号" color="danger" isDisabled={batchBusy} radius="sm" size="sm" variant="light" onPress={() => { setDeleting(account); deleteModal.onOpen(); }}><Trash2 size={16} /></Button></Tooltip></div></TableCell>
                     </TableRow>
                   );
                 }}

@@ -69,13 +69,29 @@ type accountCredentialImportResponse struct {
 	Errors   []accountCredentialImportError `json:"errors,omitempty"`
 }
 
-func (a *API) HandleAccountCredentialExport(w http.ResponseWriter, _ *http.Request) {
+func (a *API) HandleAccountCredentialExport(w http.ResponseWriter, r *http.Request) {
 	bundle := accountCredentialBundle{
 		Version:    accountCredentialBundleVersion,
 		ExportedAt: time.Now().UTC(),
 		Accounts:   make([]accountCredentialBundleItem, 0),
 	}
-	for _, view := range a.store.Accounts() {
+	accountID := strings.TrimSpace(r.PathValue("id"))
+	views := a.store.Accounts()
+	if accountID != "" {
+		found := false
+		for _, view := range views {
+			if view.ID == accountID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "账号不存在"})
+			return
+		}
+		views = []AccountView{{ID: accountID}}
+	}
+	for _, view := range views {
 		account, accessToken, refreshToken, err := a.store.Account(view.ID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "无法读取账号凭据"})
@@ -88,7 +104,11 @@ func (a *API) HandleAccountCredentialExport(w http.ResponseWriter, _ *http.Reque
 		})
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Disposition", `attachment; filename="atom2api-credentials-v1.json"`)
+	filename := "atom2api-credentials-v1.json"
+	if accountID != "" {
+		filename = fmt.Sprintf("atom2api-credentials-%s-v1.json", accountID)
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(bundle); err != nil {
 		return
