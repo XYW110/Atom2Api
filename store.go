@@ -128,6 +128,10 @@ type PlanClaimSchedule struct {
 }
 
 func defaultPlanClaimSchedule() PlanClaimSchedule {
+	return PlanClaimSchedule{Cron: defaultPlanClaimCron}
+}
+
+func legacyPlanClaimSchedule() PlanClaimSchedule {
 	return PlanClaimSchedule{Enabled: true, Cron: defaultPlanClaimCron}
 }
 
@@ -200,7 +204,8 @@ type AccountView struct {
 }
 
 func (a Account) View() AccountView {
-	claimSchedule := defaultPlanClaimSchedule()
+	// Accounts saved before claim schedules were persisted used the enabled default.
+	claimSchedule := legacyPlanClaimSchedule()
 	if a.ClaimSchedule != nil {
 		claimSchedule = *a.ClaimSchedule
 	}

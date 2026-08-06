@@ -110,7 +110,7 @@ func TestCodingPlanClaimRecordsAllTierResponses(t *testing.T) {
 func TestPlanClaimScheduleAndLogs(t *testing.T) {
 	_, store := newTestStore(t)
 	account := addTestAccount(t, store, "https://example.com")
-	if !account.ClaimSchedule.Enabled || account.ClaimSchedule.Cron != defaultPlanClaimCron {
+	if account.ClaimSchedule.Enabled || account.ClaimSchedule.Cron != defaultPlanClaimCron {
 		t.Fatalf("default schedule = %#v", account.ClaimSchedule)
 	}
 
@@ -157,6 +157,13 @@ func TestPlanClaimScheduleAndLogs(t *testing.T) {
 	}
 }
 
+func TestLegacyPlanClaimScheduleRemainsEnabled(t *testing.T) {
+	schedule := (Account{}).View().ClaimSchedule
+	if !schedule.Enabled || schedule.Cron != defaultPlanClaimCron {
+		t.Fatalf("legacy schedule = %#v", schedule)
+	}
+}
+
 func TestAccountScheduleAPIValidationAndClaimLogFilter(t *testing.T) {
 	_, store := newTestStore(t)
 	account := addTestAccount(t, store, "https://example.com")
@@ -188,7 +195,7 @@ func TestAccountScheduleAPIValidationAndClaimLogFilter(t *testing.T) {
 	if err := json.Unmarshal(validResponse.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode account: %v", err)
 	}
-	if updated.Name != "Daily Account" || updated.ClaimSchedule.Cron != "30 9 * * 1-5" {
+	if updated.Name != "Daily Account" || !updated.ClaimSchedule.Enabled || updated.ClaimSchedule.Cron != "30 9 * * 1-5" {
 		t.Fatalf("updated account = %#v", updated)
 	}
 

@@ -83,6 +83,9 @@ func TestAccountCredentialBundleRoundTrip(t *testing.T) {
 	if imported.Name != view.Name || imported.Note != "备用设备" || imported.Enabled || access != "access-export" || refresh != "refresh-export" {
 		t.Fatalf("imported account = %#v, access=%q, refresh=%q", imported, access, refresh)
 	}
+	if imported.ClaimSchedule == nil || imported.ClaimSchedule.Enabled || imported.ClaimSchedule.Cron != defaultPlanClaimCron {
+		t.Fatalf("imported account schedule = %#v", imported.ClaimSchedule)
+	}
 
 	if _, err := target.UpdateAccount(imported.ID, func(account *Account) error {
 		account.RequestCount = 12
