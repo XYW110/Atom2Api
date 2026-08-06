@@ -24,6 +24,7 @@ export default function KeysPage() {
   const [allowedModels, setAllowedModels] = useState<string[]>([]);
   const [rpmLimit, setRPMLimit] = useState('0');
   const [concurrencyLimit, setConcurrencyLimit] = useState('0');
+  const [routeStrategy, setRouteStrategy] = useState<'fill' | 'round_robin'>('fill');
   const [editing, setEditing] = useState<APIKeyRecord | null>(null);
   const [secret, setSecret] = useState('');
   const [copied, setCopied] = useState(false);
@@ -61,6 +62,7 @@ export default function KeysPage() {
     setAllowedModels(key?.allowed_models || []);
     setRPMLimit(String(key?.rpm_limit || 0));
     setConcurrencyLimit(String(key?.concurrency_limit || 0));
+    setRouteStrategy(key?.route_strategy || 'fill');
   };
 
   const readForm = (action: string) => {
@@ -74,7 +76,7 @@ export default function KeysPage() {
       showToast('error', `${action}密钥失败`, 'RPM 与并发上限必须是大于或等于 0 的整数');
       return null;
     }
-    return { name: name.trim(), allowed_models: allowedModels, rpm_limit: rpm, concurrency_limit: concurrency };
+    return { name: name.trim(), allowed_models: allowedModels, rpm_limit: rpm, concurrency_limit: concurrency, route_strategy: routeStrategy };
   };
 
   const openCreate = () => {
@@ -172,6 +174,14 @@ export default function KeysPage() {
 
   const formFields = () => <>
     <Input autoFocus isRequired label="名称" labelPlacement="outside" placeholder="例如：生产服务" radius="sm" value={name} onValueChange={setName} />
+    <div>
+      <label className="mb-2 block text-sm font-medium text-zinc-700" htmlFor="route-strategy">路由策略</label>
+      <select id="route-strategy" className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-800 outline-none focus:border-blue-500" value={routeStrategy} onChange={(event) => setRouteStrategy(event.target.value as 'fill' | 'round_robin')}>
+        <option value="fill">填充：同一 Key + 模型固定账号</option>
+        <option value="round_robin">轮询：每次请求随机账号</option>
+      </select>
+      <p className="mt-2 text-xs leading-5 text-zinc-400">填充模式会在账号失效或额度耗尽后自动切换，并优先按模型套餐分流。</p>
+    </div>
     <div className="grid gap-4 sm:grid-cols-2">
       <Input description="0 表示不限" label="RPM 上限" labelPlacement="outside" min={0} radius="sm" step={1} type="number" value={rpmLimit} onValueChange={setRPMLimit} />
       <Input description="0 表示不限" label="并发上限" labelPlacement="outside" min={0} radius="sm" step={1} type="number" value={concurrencyLimit} onValueChange={setConcurrencyLimit} />
@@ -201,7 +211,7 @@ export default function KeysPage() {
         <div className="border-b border-zinc-100 p-4"><Input aria-label="搜索密钥" className="w-full sm:max-w-xs" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称或前缀" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={setQuery} /></div>
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto"><Table aria-label="API 密钥列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
-            <TableHeader><TableColumn>名称</TableColumn><TableColumn>密钥前缀</TableColumn><TableColumn>模型权限</TableColumn><TableColumn>请求限制</TableColumn><TableColumn>请求 / Tokens</TableColumn><TableColumn>创建时间</TableColumn><TableColumn>最近使用</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
+            <TableHeader><TableColumn>名称</TableColumn><TableColumn>密钥前缀</TableColumn><TableColumn>模型权限</TableColumn><TableColumn>路由 / 绑定账号</TableColumn><TableColumn>请求限制</TableColumn><TableColumn>请求 / Tokens</TableColumn><TableColumn>创建时间</TableColumn><TableColumn>最近使用</TableColumn><TableColumn>状态</TableColumn><TableColumn align="end">操作</TableColumn></TableHeader>
             <TableBody items={filtered} emptyContent={<EmptyState icon={KeyRound} title="尚未创建密钥" description="创建后可用于 OpenAI SDK 的 Bearer 认证" />}>
               {(key) => {
                 const expired = Boolean(key.expires_at && new Date(key.expires_at) < new Date());
@@ -209,6 +219,7 @@ export default function KeysPage() {
                   <TableCell><p className="font-medium text-zinc-900">{key.name}</p><p className="mt-0.5 text-xs text-zinc-400">{key.id}</p></TableCell>
                   <TableCell><code className="font-mono text-xs text-zinc-600">{key.prefix}</code></TableCell>
                   <TableCell><span className="text-zinc-600">{key.allowed_models?.length ? `${key.allowed_models.length} 个模型` : '全部模型'}</span></TableCell>
+                  <TableCell><div className="min-w-64 space-y-2"><Chip color={key.route_strategy === 'round_robin' ? 'default' : 'primary'} radius="sm" size="sm" variant="flat">{key.route_strategy === 'round_robin' ? '随机轮询' : '填充固定'}</Chip>{key.route_strategy === 'round_robin' ? <p className="text-xs text-zinc-400">每次请求随机选择账号</p> : key.route_bindings?.length ? key.route_bindings.map((binding) => { const window = (binding.plan.rate_limit_windows || []).find((item) => item.window_hours === 5 || item.window_size_seconds === 18000) || (binding.plan.rate_limit_windows || []).find((item) => item.show_enable === 1); const percent = Math.min(window?.usage_percent || 0, 100); const quota = window && window.call_limit > 0 ? `${window.calls_used.toLocaleString()} / ${window.call_limit.toLocaleString()} 次` : '额度不限'; const windowLabel = `${window?.window_hours || 5} 小时`; return <div key={binding.model} className="rounded-md border border-zinc-100 bg-zinc-50 px-2.5 py-2"><div className="flex items-center justify-between gap-2"><code className="truncate font-mono text-[11px] text-zinc-700" title={binding.model}>{binding.model}</code><span className="shrink-0 text-[11px] text-zinc-500">{binding.account_name || binding.account_id || '待分配'}</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-200"><div className={`h-full ${percent >= 90 ? 'bg-red-500' : percent >= 70 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }} /></div><div className="mt-1 flex justify-between gap-2 text-[10px] text-zinc-400"><span>{windowLabel} {quota}</span><span>{binding.account_status || '未知'}</span></div></div>; }) : <p className="text-xs text-zinc-400">请求后自动分配账号</p>}</div></TableCell>
                   <TableCell>{key.rpm_limit || key.concurrency_limit ? <div className="space-y-0.5 whitespace-nowrap text-xs text-zinc-600"><p>RPM {key.rpm_limit || '不限'}</p><p>并发 {key.concurrency_limit || '不限'}</p></div> : <span className="text-zinc-400">不限</span>}</TableCell>
                   <TableCell><p className="font-medium text-zinc-800">{formatTokens(key.request_count)} 次</p><p className="mt-0.5 text-xs text-zinc-400">{formatTokens(key.input_tokens + key.output_tokens)} tokens</p></TableCell>
                   <TableCell><span className="whitespace-nowrap text-zinc-500">{formatDateTime(key.created_at)}</span></TableCell>

@@ -25,7 +25,7 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 - Coding Plan: claims plans in `Max -> Pro -> Lite` order and reads subscription type, rolling quota, expiry time, model catalog, and 60-day usage
 - OpenAI-compatible endpoints: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/completions`, and `/v1/embeddings`
 - Streaming proxy: forwards SSE in real time, automatically requests `include_usage`, and records input, output, cached, and reasoning tokens
-- Multi-account routing: skips disabled or quota-exhausted accounts and distributes requests across available accounts in round-robin order
+- Multi-account routing: supports per-request random routing or sticky per-key, per-model account filling
 - Account credential migration: exports an OAuth credential bundle from Accounts and imports it on another device before synchronizing the account
 - API keys: stores SHA-256 digests only and supports model allowlists, revocation, restoration, and expiration
 - Management security: bcrypt password hashing, HttpOnly and SameSite sessions, login rate limiting, and AES-256-GCM encryption for stored OAuth tokens
@@ -37,6 +37,15 @@ Atom2Api exposes AtomGit Coding Plan accounts through an OpenAI-compatible API f
 Model management provides an experimental "Responses to Chat" switch. When disabled, `/v1/responses` requests are forwarded unchanged to the model's native Responses endpoint. When enabled, Atom2Api calls `/v1/chat/completions` directly and converts the request, buffered response, and streaming SSE back to the Responses API. The switch defaults to enabled for `GLM-5.2` and disabled for other models; models with a verified native Responses channel should keep it disabled. The response header `X-Atom2api-Responses-Compat: chat-completions` identifies requests served by this conversion.
 
 The compatibility layer supports text, image URLs, function tools, JSON Schema, usage, and streaming events. It accepts `prompt_cache_key` but does not forward this cache-routing hint to Chat Completions. Chat Completions cannot provide equivalent server-side state such as `store=true` or `previous_response_id`, or OpenAI built-in tools; those inputs return `400 unsupported_parameter` instead of being silently ignored.
+
+### API key routing strategies
+
+Each API key can choose **Fill** or **Round robin** in Key Management:
+
+- **Fill** keeps a key on one account for each model and persists the binding. It switches only when the account is disabled, invalid, unavailable for that model, or its five-hour quota is exhausted. Different keys are assigned different accounts when possible, and share an account only when there are not enough eligible accounts.
+- **Round robin** randomly selects an eligible account for every request and does not use bindings.
+
+Plan-aware routing keeps Lite accounts on DeepSeek. DeepSeek prefers non-exhausted Lite accounts and falls back to Pro/Max when Lite is unavailable. GLM-5.2 is restricted to Pro, Pro trial, and Max accounts. Fill bindings and the selected account's five-hour call quota are visible in Key Management.
 
 Account management also provides protocol probing for every available model on an account. The probe checks Chat Completions and native Responses separately. It uses normal JSON requests by default and can optionally validate streaming SSE completion events.
 

@@ -147,6 +147,18 @@ export interface APIKeyRecord {
   request_count: number;
   input_tokens: number;
   output_tokens: number;
+  route_strategy: 'fill' | 'round_robin';
+  route_bindings?: APIKeyRouteBinding[];
+}
+
+export interface APIKeyRouteBinding {
+  model: string;
+  account_id: string;
+  account_name: string;
+  account_status: string;
+  account_enabled: boolean;
+  plan: CodingPlanStatus;
+  updated_at: string;
 }
 
 export interface ModelRecord {

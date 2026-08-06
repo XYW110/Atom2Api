@@ -25,7 +25,7 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 - Coding Plan：按 `Max -> Pro -> Lite` 领取，读取订阅类型、滚动额度、到期时间、模型目录和 60 天用量
 - OpenAI 兼容端点：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/completions`、`/v1/embeddings`
 - 流式代理：SSE 即时转发，自动请求 `include_usage`，记录输入、输出、缓存和推理 tokens
-- 多账号路由：跳过停用或额度耗尽账号，在可用账号之间轮询
+- 多账号路由：支持按请求随机轮询，或按 API Key + 模型填充固定账号
 - 账号凭据迁移：从账号管理导出 OAuth 凭据包，在另一台设备导入并自动同步账号
 - API Key：仅保存 SHA-256 摘要，支持模型白名单、撤销、恢复和过期时间
 - 管理安全：bcrypt 密码哈希、HttpOnly + SameSite 会话、登录限速、OAuth token AES-256-GCM 加密落盘
@@ -37,6 +37,15 @@ Atom2Api 将 AtomGit Coding Plan 账号统一转换为可供外部应用调用�
 模型管理提供“Responses 转 Chat”实验性开关。开关关闭时，`/v1/responses` 请求会原样发送到模型的原生 Responses 上游；开关开启时，Atom2Api 会直接改调 `/v1/chat/completions`，并将请求、普通响应和流式 SSE 转换回 Responses API。`GLM-5.2` 默认开启该开关，其它模型默认关闭；确认原生 Responses 渠道可用的模型应保持关闭。响应头 `X-Atom2api-Responses-Compat: chat-completions` 表示本次请求使用了兼容转换。
 
 兼容层支持文本、图片 URL、函数工具、JSON Schema、用量和流式事件。兼容层会接受 `prompt_cache_key`，但不会把这一缓存路由提示转发给 Chat Completions。Chat Completions 无法等价提供的服务端状态（例如 `store=true`、`previous_response_id`）和 OpenAI 内置工具会返回 `400 unsupported_parameter`，不会被静默忽略。
+
+### API Key 路由策略
+
+每个 API Key 可以在“密钥管理”中选择“填充”或“轮询”：
+
+- **填充**：同一 Key 请求同一模型时固定使用同一账号，绑定关系会持久化；账号停用、失效或 5 小时额度耗尽后才切换。不同 Key 会优先分配到不同账号，账号数量不足时允许共享。
+- **轮询**：每次请求从当前可用账号中随机选择，不使用固定绑定。
+
+模型分流遵循套餐能力：Lite 账号只参与 DeepSeek，DeepSeek 优先使用未耗尽的 Lite，Lite 不可用后回退到 Pro/Max；GLM-5.2 仅从 Pro、Pro 体验版和 Max 账号中选择。填充模式下，密钥管理页面会显示每个模型的当前账号及其 5 小时调用额度。
 
 账号管理中的协议探测会对该账号的全部可用模型分别测试 Chat Completions 与原生 Responses。探测面板默认执行普通 JSON 请求，也可以开启流式传输测试以验证 SSE 完成事件。
 

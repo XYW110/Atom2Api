@@ -225,45 +225,88 @@ func (a Account) View() AccountView {
 }
 
 type APIKey struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	Prefix           string     `json:"prefix"`
-	Hash             string     `json:"hash"`
-	Enabled          bool       `json:"enabled"`
-	AllowedModels    []string   `json:"allowed_models,omitempty"`
-	RPMLimit         int        `json:"rpm_limit"`
-	ConcurrencyLimit int        `json:"concurrency_limit"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt       *time.Time `json:"last_used_at,omitempty"`
-	RequestCount     int64      `json:"request_count"`
-	InputTokens      int64      `json:"input_tokens"`
-	OutputTokens     int64      `json:"output_tokens"`
+	ID               string                        `json:"id"`
+	Name             string                        `json:"name"`
+	Prefix           string                        `json:"prefix"`
+	Hash             string                        `json:"hash"`
+	Enabled          bool                          `json:"enabled"`
+	AllowedModels    []string                      `json:"allowed_models,omitempty"`
+	RPMLimit         int                           `json:"rpm_limit"`
+	ConcurrencyLimit int                           `json:"concurrency_limit"`
+	CreatedAt        time.Time                     `json:"created_at"`
+	ExpiresAt        *time.Time                    `json:"expires_at,omitempty"`
+	LastUsedAt       *time.Time                    `json:"last_used_at,omitempty"`
+	RequestCount     int64                         `json:"request_count"`
+	InputTokens      int64                         `json:"input_tokens"`
+	OutputTokens     int64                         `json:"output_tokens"`
+	RouteStrategy    string                        `json:"route_strategy,omitempty"`
+	RouteBindings    map[string]APIKeyRouteBinding `json:"route_bindings,omitempty"`
+}
+
+const (
+	RouteStrategyFill       = "fill"
+	RouteStrategyRoundRobin = "round_robin"
+)
+
+type APIKeyRouteBinding struct {
+	Model     string    `json:"model"`
+	AccountID string    `json:"account_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type APIKeyRouteView struct {
+	Model          string           `json:"model"`
+	AccountID      string           `json:"account_id"`
+	AccountName    string           `json:"account_name"`
+	AccountStatus  string           `json:"account_status"`
+	AccountEnabled bool             `json:"account_enabled"`
+	Plan           CodingPlanStatus `json:"plan"`
+	UpdatedAt      time.Time        `json:"updated_at"`
 }
 
 type APIKeyView struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	Prefix           string     `json:"prefix"`
-	Enabled          bool       `json:"enabled"`
-	AllowedModels    []string   `json:"allowed_models,omitempty"`
-	RPMLimit         int        `json:"rpm_limit"`
-	ConcurrencyLimit int        `json:"concurrency_limit"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt       *time.Time `json:"last_used_at,omitempty"`
-	RequestCount     int64      `json:"request_count"`
-	InputTokens      int64      `json:"input_tokens"`
-	OutputTokens     int64      `json:"output_tokens"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Prefix           string            `json:"prefix"`
+	Enabled          bool              `json:"enabled"`
+	AllowedModels    []string          `json:"allowed_models,omitempty"`
+	RPMLimit         int               `json:"rpm_limit"`
+	ConcurrencyLimit int               `json:"concurrency_limit"`
+	CreatedAt        time.Time         `json:"created_at"`
+	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
+	LastUsedAt       *time.Time        `json:"last_used_at,omitempty"`
+	RequestCount     int64             `json:"request_count"`
+	InputTokens      int64             `json:"input_tokens"`
+	OutputTokens     int64             `json:"output_tokens"`
+	RouteStrategy    string            `json:"route_strategy"`
+	RouteBindings    []APIKeyRouteView `json:"route_bindings,omitempty"`
 }
 
 func (key APIKey) View() APIKeyView {
+	strategy := normalizeRouteStrategy(key.RouteStrategy)
 	return APIKeyView{
 		ID: key.ID, Name: key.Name, Prefix: key.Prefix, Enabled: key.Enabled,
 		AllowedModels: append([]string(nil), key.AllowedModels...), RPMLimit: key.RPMLimit,
 		ConcurrencyLimit: key.ConcurrencyLimit, CreatedAt: key.CreatedAt,
 		ExpiresAt: key.ExpiresAt, LastUsedAt: key.LastUsedAt, RequestCount: key.RequestCount,
 		InputTokens: key.InputTokens, OutputTokens: key.OutputTokens,
+		RouteStrategy: strategy,
+	}
+}
+
+func normalizeRouteStrategy(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), RouteStrategyRoundRobin) {
+		return RouteStrategyRoundRobin
+	}
+	return RouteStrategyFill
+}
+
+func validRouteStrategy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case RouteStrategyFill, RouteStrategyRoundRobin:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -651,6 +694,10 @@ func (s *Store) CreateAPIKey(name string, allowedModels []string, expiresAt *tim
 }
 
 func (s *Store) CreateAPIKeyWithLimits(name string, allowedModels []string, expiresAt *time.Time, rpmLimit, concurrencyLimit int) (APIKeyView, string, error) {
+	return s.CreateAPIKeyWithRouting(name, allowedModels, expiresAt, rpmLimit, concurrencyLimit, RouteStrategyFill)
+}
+
+func (s *Store) CreateAPIKeyWithRouting(name string, allowedModels []string, expiresAt *time.Time, rpmLimit, concurrencyLimit int, routeStrategy string) (APIKeyView, string, error) {
 	if rpmLimit < 0 || concurrencyLimit < 0 {
 		return APIKeyView{}, "", errors.New("API key limits cannot be negative")
 	}
@@ -665,6 +712,7 @@ func (s *Store) CreateAPIKeyWithLimits(name string, allowedModels []string, expi
 		ID: randomID("key"), Name: strings.TrimSpace(name), Prefix: secret[:18] + "...",
 		Hash: hex.EncodeToString(digest[:]), Enabled: true, AllowedModels: uniqueStrings(allowedModels),
 		RPMLimit: rpmLimit, ConcurrencyLimit: concurrencyLimit, CreatedAt: now, ExpiresAt: expiresAt,
+		RouteStrategy: normalizeRouteStrategy(routeStrategy), RouteBindings: map[string]APIKeyRouteBinding{},
 	}
 	if key.Name == "" {
 		key.Name = "API Key"
@@ -682,8 +730,27 @@ func (s *Store) APIKeys() []APIKeyView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	views := make([]APIKeyView, 0, len(s.state.APIKeys))
+	accounts := make(map[string]Account, len(s.state.Accounts))
+	for _, account := range s.state.Accounts {
+		accounts[account.ID] = account
+	}
 	for _, key := range s.state.APIKeys {
-		views = append(views, key.View())
+		view := key.View()
+		for _, binding := range key.RouteBindings {
+			account, exists := accounts[binding.AccountID]
+			route := APIKeyRouteView{
+				Model: binding.Model, AccountID: binding.AccountID, UpdatedAt: binding.UpdatedAt,
+			}
+			if exists {
+				route.AccountName = account.Name
+				route.AccountStatus = account.Status
+				route.AccountEnabled = account.Enabled
+				route.Plan = account.Plan
+			}
+			view.RouteBindings = append(view.RouteBindings, route)
+		}
+		sort.Slice(view.RouteBindings, func(i, j int) bool { return view.RouteBindings[i].Model < view.RouteBindings[j].Model })
+		views = append(views, view)
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].CreatedAt.After(views[j].CreatedAt) })
 	return views
@@ -702,7 +769,15 @@ func (s *Store) AuthenticateAPIKey(secret string) (APIKey, bool) {
 		if !key.Enabled || (key.ExpiresAt != nil && now.After(*key.ExpiresAt)) {
 			return APIKey{}, false
 		}
-		return key, true
+		result := key
+		result.AllowedModels = append([]string(nil), key.AllowedModels...)
+		if key.RouteBindings != nil {
+			result.RouteBindings = make(map[string]APIKeyRouteBinding, len(key.RouteBindings))
+			for model, binding := range key.RouteBindings {
+				result.RouteBindings[model] = binding
+			}
+		}
+		return result, true
 	}
 	return APIKey{}, false
 }
@@ -712,6 +787,10 @@ func (s *Store) UpdateAPIKey(id string, name *string, enabled *bool, allowedMode
 }
 
 func (s *Store) UpdateAPIKeyWithLimits(id string, name *string, enabled *bool, allowedModels *[]string, expiresAt **time.Time, rpmLimit, concurrencyLimit *int) (APIKeyView, error) {
+	return s.UpdateAPIKeyWithRouting(id, name, enabled, allowedModels, expiresAt, rpmLimit, concurrencyLimit, nil)
+}
+
+func (s *Store) UpdateAPIKeyWithRouting(id string, name *string, enabled *bool, allowedModels *[]string, expiresAt **time.Time, rpmLimit, concurrencyLimit *int, routeStrategy *string) (APIKeyView, error) {
 	if (rpmLimit != nil && *rpmLimit < 0) || (concurrencyLimit != nil && *concurrencyLimit < 0) {
 		return APIKeyView{}, errors.New("API key limits cannot be negative")
 	}
@@ -737,6 +816,9 @@ func (s *Store) UpdateAPIKeyWithLimits(id string, name *string, enabled *bool, a
 		if concurrencyLimit != nil {
 			key.ConcurrencyLimit = *concurrencyLimit
 		}
+		if routeStrategy != nil {
+			key.RouteStrategy = normalizeRouteStrategy(*routeStrategy)
+		}
 		if expiresAt != nil {
 			key.ExpiresAt = *expiresAt
 		}
@@ -746,6 +828,45 @@ func (s *Store) UpdateAPIKeyWithLimits(id string, name *string, enabled *bool, a
 		return key.View(), nil
 	}
 	return APIKeyView{}, os.ErrNotExist
+}
+
+func (s *Store) SetAPIKeyRouteBinding(keyID, model, accountID string) error {
+	keyID = strings.TrimSpace(keyID)
+	model = strings.TrimSpace(model)
+	accountID = strings.TrimSpace(accountID)
+	if keyID == "" || model == "" || accountID == "" {
+		return errors.New("API key route binding requires key, model, and account")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.state.APIKeys {
+		key := &s.state.APIKeys[i]
+		if key.ID != keyID {
+			continue
+		}
+		if key.RouteBindings == nil {
+			key.RouteBindings = map[string]APIKeyRouteBinding{}
+		}
+		current, exists := key.RouteBindings[model]
+		if exists && current.AccountID == accountID {
+			return nil
+		}
+		key.RouteBindings[model] = APIKeyRouteBinding{Model: model, AccountID: accountID, UpdatedAt: time.Now().UTC()}
+		return s.saveLocked()
+	}
+	return os.ErrNotExist
+}
+
+func (s *Store) APIKeyRouteAssignments(model string) map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	assignments := make(map[string]string)
+	for _, key := range s.state.APIKeys {
+		if binding, exists := key.RouteBindings[model]; exists && binding.AccountID != "" {
+			assignments[key.ID] = binding.AccountID
+		}
+	}
+	return assignments
 }
 
 func (s *Store) DeleteAPIKey(id string) error {

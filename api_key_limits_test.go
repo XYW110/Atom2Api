@@ -69,6 +69,50 @@ func TestAPIKeyLimitValidation(t *testing.T) {
 	}
 }
 
+func TestAPIKeyRouteStrategyIsStoredAndValidated(t *testing.T) {
+	_, store := newTestStore(t)
+	api := NewAPI(store, nil, nil, nil, nil)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(`{"name":"random","route_strategy":"round_robin"}`))
+	createResponse := httptest.NewRecorder()
+	api.HandleCreateKey(createResponse, createRequest)
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createResponse.Code, createResponse.Body.String())
+	}
+	var created struct {
+		Key APIKeyView `json:"key"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.Key.RouteStrategy != RouteStrategyRoundRobin {
+		t.Fatalf("created route strategy = %q", created.Key.RouteStrategy)
+	}
+
+	updateRequest := httptest.NewRequest(http.MethodPatch, "/api/keys/"+created.Key.ID, strings.NewReader(`{"route_strategy":"fill"}`))
+	updateRequest.SetPathValue("id", created.Key.ID)
+	updateResponse := httptest.NewRecorder()
+	api.HandleUpdateKey(updateResponse, updateRequest)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
+	}
+	var updated APIKeyView
+	if err := json.Unmarshal(updateResponse.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.RouteStrategy != RouteStrategyFill {
+		t.Fatalf("updated route strategy = %q", updated.RouteStrategy)
+	}
+
+	invalidRequest := httptest.NewRequest(http.MethodPatch, "/api/keys/"+created.Key.ID, strings.NewReader(`{"route_strategy":"invalid"}`))
+	invalidRequest.SetPathValue("id", created.Key.ID)
+	invalidResponse := httptest.NewRecorder()
+	api.HandleUpdateKey(invalidResponse, invalidRequest)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid route strategy status = %d", invalidResponse.Code)
+	}
+}
+
 func TestAPIKeyLimiterEnforcesRollingRPM(t *testing.T) {
 	limiter := newAPIKeyLimiter()
 	now := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)

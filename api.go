@@ -349,6 +349,7 @@ func (a *API) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt        string   `json:"expires_at"`
 		RPMLimit         int      `json:"rpm_limit"`
 		ConcurrencyLimit int      `json:"concurrency_limit"`
+		RouteStrategy    string   `json:"route_strategy"`
 	}
 	if !decodeJSONBody(w, r, &request, 16<<10) {
 		return
@@ -366,7 +367,11 @@ func (a *API) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "API key limits cannot be negative"})
 		return
 	}
-	view, secret, err := a.store.CreateAPIKeyWithLimits(request.Name, request.AllowedModels, expires, request.RPMLimit, request.ConcurrencyLimit)
+	if request.RouteStrategy != "" && !validRouteStrategy(request.RouteStrategy) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "route_strategy must be fill or round_robin"})
+		return
+	}
+	view, secret, err := a.store.CreateAPIKeyWithRouting(request.Name, request.AllowedModels, expires, request.RPMLimit, request.ConcurrencyLimit, request.RouteStrategy)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
@@ -381,6 +386,7 @@ func (a *API) HandleUpdateKey(w http.ResponseWriter, r *http.Request) {
 		AllowedModels    *[]string `json:"allowed_models"`
 		RPMLimit         *int      `json:"rpm_limit"`
 		ConcurrencyLimit *int      `json:"concurrency_limit"`
+		RouteStrategy    *string   `json:"route_strategy"`
 	}
 	if !decodeJSONBody(w, r, &request, 16<<10) {
 		return
@@ -393,7 +399,11 @@ func (a *API) HandleUpdateKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "API key limits cannot be negative"})
 		return
 	}
-	view, err := a.store.UpdateAPIKeyWithLimits(r.PathValue("id"), request.Name, request.Enabled, request.AllowedModels, nil, request.RPMLimit, request.ConcurrencyLimit)
+	if request.RouteStrategy != nil && !validRouteStrategy(*request.RouteStrategy) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "route_strategy must be fill or round_robin"})
+		return
+	}
+	view, err := a.store.UpdateAPIKeyWithRouting(r.PathValue("id"), request.Name, request.Enabled, request.AllowedModels, nil, request.RPMLimit, request.ConcurrencyLimit, request.RouteStrategy)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -408,6 +418,9 @@ func (a *API) HandleDeleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.keyLimiter.forget(keyID)
+	if a.models != nil {
+		a.models.ForgetAPIKeyRoutes(keyID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
