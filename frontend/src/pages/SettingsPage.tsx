@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AlertCircle, ArrowUpCircle, Bug, Check, ExternalLink, Github, KeyRound, Network, RefreshCw, Save, Settings2, ShieldAlert, Trash2 } from 'lucide-react';
-import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Switch, Tooltip, useDisclosure } from '@heroui/react';
+import { AlertCircle, ArrowUpCircle, Bug, Check, ExternalLink, Github, KeyRound, Network, RefreshCw, RotateCcw, Save, Settings2, ShieldAlert, Trash2 } from 'lucide-react';
+import { Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Skeleton, Switch, Textarea, Tooltip, useDisclosure } from '@heroui/react';
 import { PageShell, StatusDot } from '../components/PageShell';
 import { useToast } from '../components/Toast';
 import { apiFetch, type AuditCleanupResponse, type SettingsResponse, type UserAgentCheckResponse, type VersionInfo, errorMessage, formatDateTime, jsonRequest } from '../api';
 
-type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'request_timeout_seconds' | 'request_retry_count' | 'request_retry_status_codes' | 'audit_retention_days' | 'audit_detail_retention_days'>;
+type SettingsForm = Pick<SettingsResponse, 'user_agent' | 'platform_base_url' | 'codingplan_api_url' | 'gateway_url' | 'signer_url' | 'audit_debug_enabled' | 'system_prompt_enabled' | 'system_prompt' | 'request_timeout_seconds' | 'request_retry_count' | 'request_retry_status_codes' | 'audit_retention_days' | 'audit_detail_retention_days'>;
 type ProjectVersionInfo = VersionInfo & { repository_url: string };
 type AuditCleanupTarget = 'records' | 'details';
 
 const emptyForm: SettingsForm = {
-  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, request_timeout_seconds: 120, request_retry_count: 0, request_retry_status_codes: '', audit_retention_days: 30, audit_detail_retention_days: 30,
+  user_agent: '', platform_base_url: '', codingplan_api_url: '', gateway_url: '', signer_url: '', audit_debug_enabled: false, system_prompt_enabled: false, system_prompt: '', request_timeout_seconds: 120, request_retry_count: 0, request_retry_status_codes: '', audit_retention_days: 30, audit_detail_retention_days: 30,
 };
 
 function settingsForm(response: SettingsResponse): SettingsForm {
@@ -21,6 +21,8 @@ function settingsForm(response: SettingsResponse): SettingsForm {
     gateway_url: response.gateway_url,
     signer_url: response.signer_url,
     audit_debug_enabled: response.audit_debug_enabled,
+    system_prompt_enabled: response.system_prompt_enabled,
+    system_prompt: response.system_prompt,
     request_timeout_seconds: response.request_timeout_seconds,
     request_retry_count: response.request_retry_count,
     request_retry_status_codes: response.request_retry_status_codes,
@@ -241,6 +243,7 @@ export default function SettingsPage() {
     form.user_agent !== settings?.user_agent || form.platform_base_url !== settings?.platform_base_url ||
     form.codingplan_api_url !== settings?.codingplan_api_url || form.gateway_url !== settings?.gateway_url ||
     form.signer_url !== settings?.signer_url || form.audit_debug_enabled !== settings?.audit_debug_enabled ||
+    form.system_prompt_enabled !== settings?.system_prompt_enabled || form.system_prompt !== settings?.system_prompt ||
     form.request_timeout_seconds !== settings?.request_timeout_seconds || form.request_retry_count !== settings?.request_retry_count ||
     form.request_retry_status_codes !== settings?.request_retry_status_codes || form.audit_retention_days !== settings?.audit_retention_days ||
     form.audit_detail_retention_days !== settings?.audit_detail_retention_days ||
@@ -287,6 +290,11 @@ export default function SettingsPage() {
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 sm:px-6"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Network size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">服务端点</h2><p className="mt-0.5 text-xs text-zinc-500">OAuth、权益和模型网关</p></div></div><Chip className="border-zinc-200 bg-white text-zinc-600" radius="sm" size="sm" startContent={<StatusDot tone={error ? 'danger' : 'success'} />} variant="bordered">{error ? '配置异常' : '已加载'}</Chip></div>
           {loading ? <div className="grid gap-5 px-5 py-6 sm:grid-cols-2 sm:px-6">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : <div className="grid gap-5 px-5 py-6 sm:grid-cols-2 sm:px-6"><Input isRequired label="Platform OAuth" labelPlacement="outside" radius="sm" value={form.platform_base_url} onValueChange={(value) => update('platform_base_url', value)} /><Input isRequired label="Coding Plan API" labelPlacement="outside" radius="sm" value={form.codingplan_api_url} onValueChange={(value) => update('codingplan_api_url', value)} /><Input isRequired label="LLM Gateway" labelPlacement="outside" radius="sm" value={form.gateway_url} onValueChange={(value) => update('gateway_url', value)} /><Input label="请求签名服务" labelPlacement="outside" placeholder="https://signer.example.com/v1/sign" radius="sm" value={form.signer_url} onValueChange={(value) => update('signer_url', value)} /></div>}
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4 sm:px-6"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700"><Settings2 size={18} /></span><div><h2 className="text-sm font-semibold text-zinc-900">系统提示词</h2><p className="mt-0.5 text-xs text-zinc-500">向模型请求自动添加一段系统指令</p></div></div><Switch aria-label="切换系统提示词" color="primary" isSelected={form.system_prompt_enabled} onValueChange={(selected) => update('system_prompt_enabled', selected)}><span className="text-sm text-zinc-600">{form.system_prompt_enabled ? '已开启' : '已关闭'}</span></Switch></div>
+          <div className="space-y-4 px-5 py-6 sm:px-6"><Textarea description="{model} 会替换为当前请求的模型名称" label="提示词模板" labelPlacement="outside" minRows={6} radius="sm" value={form.system_prompt} classNames={{ input: 'font-mono text-sm' }} onValueChange={(value) => update('system_prompt', value)} /><div className="flex justify-end"><Button radius="sm" startContent={<RotateCcw size={15} />} type="button" variant="flat" onPress={() => update('system_prompt', settings?.default_system_prompt || '')}>重置为默认</Button></div></div>
         </section>
 
         <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">

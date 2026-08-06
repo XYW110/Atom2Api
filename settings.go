@@ -19,6 +19,9 @@ type settingsResponse struct {
 	SignerURL                string    `json:"signer_url"`
 	SignerConfigured         bool      `json:"signer_configured"`
 	AuditDebugEnabled        bool      `json:"audit_debug_enabled"`
+	SystemPromptEnabled      bool      `json:"system_prompt_enabled"`
+	SystemPrompt             string    `json:"system_prompt"`
+	DefaultSystemPrompt      string    `json:"default_system_prompt"`
 	RequestTimeoutSecs       int       `json:"request_timeout_seconds"`
 	RequestRetryCount        int       `json:"request_retry_count"`
 	RetryStatusCodes         string    `json:"request_retry_status_codes"`
@@ -37,6 +40,8 @@ type updateSettingsRequest struct {
 	SignerToken              *string `json:"signer_token"`
 	AdminPassword            *string `json:"admin_password"`
 	AuditDebugEnabled        *bool   `json:"audit_debug_enabled"`
+	SystemPromptEnabled      *bool   `json:"system_prompt_enabled"`
+	SystemPrompt             *string `json:"system_prompt"`
 	RequestTimeoutSecs       *int    `json:"request_timeout_seconds"`
 	RequestRetryCount        *int    `json:"request_retry_count"`
 	RetryStatusCodes         *string `json:"request_retry_status_codes"`
@@ -56,7 +61,7 @@ func handleGetSettings(config *ConfigManager) http.HandlerFunc {
 
 func handleUpdateSettings(config *ConfigManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+		r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
 
@@ -94,6 +99,12 @@ func handleUpdateSettings(config *ConfigManager) http.HandlerFunc {
 		}
 		if request.AuditDebugEnabled != nil {
 			updated.AuditDebugEnabled = *request.AuditDebugEnabled
+		}
+		if request.SystemPromptEnabled != nil {
+			updated.SystemPromptEnabled = *request.SystemPromptEnabled
+		}
+		if request.SystemPrompt != nil {
+			updated.SystemPrompt = *request.SystemPrompt
 		}
 		if request.RequestTimeoutSecs != nil {
 			updated.RequestTimeoutSecs = *request.RequestTimeoutSecs
@@ -137,8 +148,10 @@ func writeSettingsResponse(w http.ResponseWriter, status int, snapshot ConfigSna
 		PlatformBaseURL: snapshot.PlatformBaseURL, CodingPlanAPIURL: snapshot.CodingPlanAPIURL,
 		GatewayURL: snapshot.GatewayURL, SignerURL: snapshot.SignerURL,
 		SignerConfigured: true, AuditDebugEnabled: snapshot.AuditDebugEnabled,
-		RequestTimeoutSecs: snapshot.RequestTimeoutSecs,
-		RequestRetryCount:  snapshot.RequestRetryCount, RetryStatusCodes: snapshot.RetryStatusCodes,
+		SystemPromptEnabled: snapshot.SystemPromptEnabled, SystemPrompt: snapshot.SystemPrompt,
+		DefaultSystemPrompt: defaultSystemPrompt,
+		RequestTimeoutSecs:  snapshot.RequestTimeoutSecs,
+		RequestRetryCount:   snapshot.RequestRetryCount, RetryStatusCodes: snapshot.RetryStatusCodes,
 		AuditRetentionDays: snapshot.AuditRetentionDays, AuditDetailRetentionDays: snapshot.AuditDetailRetentionDays,
 		DefaultPassword: defaultAdminPasswordActive(snapshot.AdminPassword), LoadedAt: snapshot.LoadedAt,
 	})

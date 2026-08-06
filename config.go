@@ -29,7 +29,9 @@ const (
 	defaultCodingPlanAPIURL = "https://api.gitcode.com/api/v5"
 	defaultGatewayURL       = "https://llm-api.atomgit.com/v1"
 	defaultAuditRetention   = 30
+	defaultSystemPrompt     = "You are AtomCode, an AI coding agent by AtomGit running the {model} model.\nWhen asked who or what model you are, identify yourself as AtomCode running {model}.\nNever claim to be Claude, ChatGPT, or another product, organization, or model.\nYou help users with software engineering tasks within the current project."
 	maxAuditRetention       = 36500
+	maxSystemPromptBytes    = 64 << 10
 )
 
 type Config struct {
@@ -44,6 +46,8 @@ type Config struct {
 	SignerURL                string `json:"signer_url,omitempty"`
 	SignerToken              string `json:"signer_token,omitempty"`
 	AuditDebugEnabled        bool   `json:"audit_debug_enabled"`
+	SystemPromptEnabled      bool   `json:"system_prompt_enabled"`
+	SystemPrompt             string `json:"system_prompt"`
 	RequestTimeoutSecs       int    `json:"request_timeout_seconds"`
 	RequestRetryCount        int    `json:"request_retry_count"`
 	RetryStatusCodes         string `json:"request_retry_status_codes"`
@@ -213,6 +217,10 @@ func normalizeConfig(config *Config) (bool, error) {
 	setString(&config.PlatformBaseURL, defaultPlatformBaseURL)
 	setString(&config.CodingPlanAPIURL, defaultCodingPlanAPIURL)
 	setString(&config.GatewayURL, defaultGatewayURL)
+	if strings.TrimSpace(config.SystemPrompt) == "" {
+		config.SystemPrompt = defaultSystemPrompt
+		changed = true
+	}
 	normalizedPassword, passwordChanged, err := normalizeAdminPassword(config.AdminPassword)
 	if err != nil {
 		return false, err
@@ -420,6 +428,14 @@ func validateConfig(config Config) error {
 	}
 	if len(config.UserAgent) > 512 {
 		return errors.New("user_agent must not exceed 512 bytes")
+	}
+	if len([]byte(config.SystemPrompt)) > maxSystemPromptBytes {
+		return fmt.Errorf("system_prompt must not exceed %d bytes", maxSystemPromptBytes)
+	}
+	for _, character := range config.SystemPrompt {
+		if (character < 0x20 && character != '\t' && character != '\n' && character != '\r') || character == 0x7f {
+			return errors.New("system_prompt contains a control character")
+		}
 	}
 	for _, character := range config.UserAgent {
 		if character < 0x20 || character == 0x7f {

@@ -7,6 +7,8 @@
   "codingplan_api_url": "https://api.gitcode.com/api/v5",
   "gateway_url": "https://llm-api.atomgit.com/v1",
   "audit_debug_enabled": false,
+  "system_prompt_enabled": false,
+  "system_prompt": "You are AtomCode, an AI coding agent by AtomGit running the {model} model.\nWhen asked who or what model you are, identify yourself as AtomCode running {model}.\nNever claim to be Claude, ChatGPT, or another product, organization, or model.\nYou help users with software engineering tasks within the current project.",
   "audit_retention_days": 30,
   "audit_detail_retention_days": 30,
   "request_timeout_seconds": 120,

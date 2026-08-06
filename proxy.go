@@ -228,6 +228,13 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 		}
 	}
 	modelJSON, _ := json.Marshal(route.Upstream)
+	if config.SystemPromptEnabled {
+		if err := applySystemPrompt(payload, r.URL.Path, route.Requested, config.SystemPrompt); err != nil {
+			audit.Error = err.Error()
+			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", audit.Error)
+			return
+		}
+	}
 	payload["model"] = modelJSON
 	streaming := false
 	if raw := payload["stream"]; raw != nil {
@@ -356,6 +363,45 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 	audit.InputTokens, audit.OutputTokens = usage.Input, usage.Output
 	audit.CachedTokens, audit.ReasoningTokens = usage.Cached, usage.Reasoning
 	audit.Error = errorText
+}
+
+func applySystemPrompt(payload map[string]json.RawMessage, path, model, template string) error {
+	prompt := strings.ReplaceAll(template, "{model}", model)
+	if strings.TrimSpace(prompt) == "" {
+		return nil
+	}
+	switch path {
+	case "/v1/chat/completions":
+		var messages []any
+		raw := payload["messages"]
+		if raw != nil {
+			if err := json.Unmarshal(raw, &messages); err != nil {
+				return errors.New("messages must be an array")
+			}
+		}
+		messages = append([]any{map[string]any{"role": "system", "content": prompt}}, messages...)
+		encoded, err := json.Marshal(messages)
+		if err != nil {
+			return errors.New("could not encode system prompt")
+		}
+		payload["messages"] = encoded
+	case "/v1/responses":
+		var instructions string
+		if raw := payload["instructions"]; raw != nil {
+			if err := json.Unmarshal(raw, &instructions); err != nil {
+				return errors.New("instructions must be a string")
+			}
+		}
+		if strings.TrimSpace(instructions) != "" {
+			prompt += "\n\n" + instructions
+		}
+		encoded, err := json.Marshal(prompt)
+		if err != nil {
+			return errors.New("could not encode system prompt")
+		}
+		payload["instructions"] = encoded
+	}
+	return nil
 }
 
 func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path string, body []byte, streaming bool, requestID string) (*http.Request, *http.Response, error) {

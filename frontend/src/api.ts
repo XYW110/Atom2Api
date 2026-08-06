@@ -297,6 +297,9 @@ export interface SettingsResponse {
   signer_url: string;
   signer_configured: boolean;
   audit_debug_enabled: boolean;
+  system_prompt_enabled: boolean;
+  system_prompt: string;
+  default_system_prompt: string;
   request_timeout_seconds: number;
   request_retry_count: number;
   request_retry_status_codes: string;
