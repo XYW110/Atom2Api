@@ -160,6 +160,7 @@ export default function AccountsPage() {
   const nextResetReloadAt = useRef(0);
   const oauthModal = useDisclosure();
   const deleteModal = useDisclosure();
+  const deleteErrorsModal = useDisclosure();
   const editModal = useDisclosure();
   const logsModal = useDisclosure();
   const probeModal = useDisclosure();
@@ -519,14 +520,29 @@ export default function AccountsPage() {
     }
   };
 
+  const removeErrorAccounts = async () => {
+    setBusy('delete:errors');
+    try {
+      const result = await apiFetch<{ deleted: number }>('/api/accounts/errors', { method: 'DELETE' });
+      deleteErrorsModal.onClose();
+      await load();
+      showToast('success', '异常账号已删除', `已删除 ${result.deleted} 个异常账号`);
+    } catch (requestError) {
+      showToast('error', '删除异常账号失败', errorMessage(requestError, '请稍后重试'));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const activeCount = accounts.filter((account) => account.enabled && account.status === 'active').length;
+  const errorCount = accounts.filter((account) => account.status === 'error').length;
   const availableConversations = accounts.reduce((sum, account) => {
     if (account.status !== 'active') return sum;
     const window = currentRateLimitWindow(account);
     return sum + (window ? Math.max(0, window.call_limit - window.calls_used) : 0);
   }, 0);
   const providerTokens = accounts.reduce((sum, account) => sum + (account.provider_usage?.total_tokens || 0), 0);
-  const batchBusy = busy === 'claim:all' || busy === 'sync:all';
+  const batchBusy = busy === 'claim:all' || busy === 'sync:all' || busy === 'delete:errors';
 
   return (
     <PageShell title="账号管理" description="AtomGit OAuth 账户、Coding Plan 权益与滚动额度" action={{ label: '连接 AtomGit', icon: Plus, onPress: () => void startOAuth() }}>
@@ -549,7 +565,7 @@ export default function AccountsPage() {
       </section>
 
       <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="flex flex-col gap-3 border-b border-zinc-100 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-col gap-3 sm:flex-row"><Input aria-label="搜索账号" className="w-full sm:w-80" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={(value) => { setQuery(value); setPage(1); }} /><select aria-label="筛选账号状态" className="h-10 min-w-32 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as Account['status'] | ''); setPage(1); }}><option value="">全部状态</option><option value="active">运行中</option><option value="paused">已暂停</option><option value="error">异常</option><option value="syncing">同步中</option></select></div><div className="grid grid-cols-2 gap-2 sm:flex"><Button color="primary" isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'claim:all')} isLoading={busy === 'claim:all'} radius="sm" startContent={busy === 'claim:all' ? null : <Gift size={16} />} variant="flat" onPress={() => void runBatchAction('claim')}>一键领取 Plan</Button><Button isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'sync:all')} isLoading={busy === 'sync:all'} radius="sm" startContent={busy === 'sync:all' ? null : <RefreshCw size={16} />} variant="bordered" onPress={() => void runBatchAction('sync')}>一键同步额度</Button></div></div>
+        <div className="flex flex-col gap-3 border-b border-zinc-100 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-col gap-3 sm:flex-row"><Input aria-label="搜索账号" className="w-full sm:w-80" classNames={{ inputWrapper: 'h-10 rounded-md border border-zinc-200 bg-white shadow-none' }} placeholder="搜索名称、用户名、备注或账号 ID" radius="sm" startContent={<Search size={16} className="text-zinc-400" />} value={query} variant="bordered" onValueChange={(value) => { setQuery(value); setPage(1); }} /><select aria-label="筛选账号状态" className="h-10 min-w-32 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as Account['status'] | ''); setPage(1); }}><option value="">全部状态</option><option value="active">运行中</option><option value="paused">已暂停</option><option value="error">异常</option><option value="syncing">同步中</option></select></div><div className="grid grid-cols-2 gap-2 sm:flex"><Button className="col-span-2 sm:col-auto" color="danger" isDisabled={loading || errorCount === 0 || (Boolean(busy) && busy !== 'delete:errors')} isLoading={busy === 'delete:errors'} radius="sm" startContent={busy === 'delete:errors' ? null : <Trash2 size={16} />} variant="flat" onPress={deleteErrorsModal.onOpen}>一键删除异常账号{errorCount > 0 ? ` (${errorCount})` : ''}</Button><Button color="primary" isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'claim:all')} isLoading={busy === 'claim:all'} radius="sm" startContent={busy === 'claim:all' ? null : <Gift size={16} />} variant="flat" onPress={() => void runBatchAction('claim')}>一键领取 Plan</Button><Button isDisabled={loading || accounts.length === 0 || (Boolean(busy) && busy !== 'sync:all')} isLoading={busy === 'sync:all'} radius="sm" startContent={busy === 'sync:all' ? null : <RefreshCw size={16} />} variant="bordered" onPress={() => void runBatchAction('sync')}>一键同步额度</Button></div></div>
         {loading ? <div className="space-y-3 p-5">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full rounded-md" />)}</div> : (
           <div className="overflow-x-auto">
             <Table aria-label="AtomGit 账号列表" removeWrapper classNames={{ th: 'bg-zinc-50 text-xs text-zinc-500', td: 'py-4 text-sm' }}>
@@ -600,6 +616,10 @@ export default function AccountsPage() {
 
       <Modal isOpen={deleteModal.isOpen} radius="sm" size="sm" onOpenChange={deleteModal.onOpenChange}>
         <ModalContent>{(onClose) => <><ModalHeader>删除账号</ModalHeader><ModalBody><p className="text-sm leading-6 text-zinc-600">删除“{deleting?.name}”后，其 OAuth 凭据和模型路由将立即移除。</p></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="danger" isLoading={busy === `delete:${deleting?.id}`} radius="sm" onPress={() => void removeAccount()}>确认删除</Button></ModalFooter></>}</ModalContent>
+      </Modal>
+
+      <Modal isOpen={deleteErrorsModal.isOpen} radius="sm" size="sm" onOpenChange={deleteErrorsModal.onOpenChange}>
+        <ModalContent>{(onClose) => <><ModalHeader>删除异常账号</ModalHeader><ModalBody><p className="text-sm leading-6 text-zinc-600">将永久删除当前 {errorCount} 个异常账号，包括其 OAuth 凭据和模型路由。此操作不可撤销。</p></ModalBody><ModalFooter><Button radius="sm" variant="light" onPress={onClose}>取消</Button><Button color="danger" isLoading={busy === 'delete:errors'} radius="sm" onPress={() => void removeErrorAccounts()}>确认全部删除</Button></ModalFooter></>}</ModalContent>
       </Modal>
     </PageShell>
   );

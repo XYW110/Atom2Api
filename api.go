@@ -253,6 +253,20 @@ func (a *API) HandleAccountDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *API) HandleErrorAccountsDelete(w http.ResponseWriter, _ *http.Request) {
+	accountIDs, err := a.store.DeleteErrorAccounts()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if a.planClaims != nil {
+		for _, accountID := range accountIDs {
+			a.planClaims.Unschedule(accountID)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": len(accountIDs)})
+}
+
 func (a *API) HandleAccountSync(w http.ResponseWriter, r *http.Request) {
 	view, err := a.codingPlan.Sync(r.Context(), r.PathValue("id"))
 	if err != nil {

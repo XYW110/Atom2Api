@@ -220,6 +220,9 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 			route.Token = refreshed
 		} else {
 			audit.Error = refreshErr.Error()
+			if oauthCredentialsUnavailable(refreshErr) {
+				p.disableAccount(route.Account.ID, audit.Error)
+			}
 			writeOpenAIError(w, http.StatusBadGateway, "upstream_auth_error", upstreamFailureMessage(http.StatusBadGateway, requestID))
 			return
 		}
@@ -277,7 +280,11 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 			}
 			break
 		}
-		if audit.RetryCount >= config.RequestRetryCount || !retryStatuses.Contains(response.StatusCode) {
+		accountUnavailable := response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden
+		if accountUnavailable {
+			p.disableAccount(route.Account.ID, fmt.Sprintf("upstream authentication failed (%d)", response.StatusCode))
+		}
+		if accountUnavailable || audit.RetryCount >= config.RequestRetryCount || !retryStatuses.Contains(response.StatusCode) {
 			if audit.RetryCount > 0 {
 				finalAttemptStarted = attemptStarted
 				finalAttemptBody = &bytes.Buffer{}
@@ -810,5 +817,17 @@ func upstreamFailureMessage(status int, requestID string) string {
 func (p *Proxy) record(record UsageRecord) {
 	if err := p.store.RecordUsage(record); err != nil {
 		log.Printf("record usage: %v", err)
+	}
+}
+
+func (p *Proxy) disableAccount(accountID, reason string) {
+	_, err := p.store.UpdateAccount(accountID, func(account *Account) error {
+		account.Enabled = false
+		account.Status = "error"
+		account.LastError = reason
+		return nil
+	})
+	if err != nil {
+		log.Printf("disable unavailable account %s: %v", accountID, err)
 	}
 }

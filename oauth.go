@@ -32,6 +32,27 @@ type platformTokenResponse struct {
 	User         UserInfo `json:"user"`
 }
 
+type oauthBrokerResponseError struct {
+	status int
+	body   string
+}
+
+func (e *oauthBrokerResponseError) Error() string {
+	return fmt.Sprintf("broker returned %d: %s", e.status, e.body)
+}
+
+type oauthCredentialsUnavailableError struct {
+	err error
+}
+
+func (e *oauthCredentialsUnavailableError) Error() string { return e.err.Error() }
+func (e *oauthCredentialsUnavailableError) Unwrap() error { return e.err }
+
+func oauthCredentialsUnavailable(err error) bool {
+	var unavailable *oauthCredentialsUnavailableError
+	return errors.As(err, &unavailable)
+}
+
 type pendingOAuth struct {
 	ID        string
 	State     string
@@ -214,16 +235,21 @@ func (m *OAuthManager) Refresh(ctx context.Context, accountID string) (string, e
 		return access, nil
 	}
 	if refresh == "" {
-		return "", errors.New("OAuth token expired and no refresh token is available")
+		return "", &oauthCredentialsUnavailableError{err: errors.New("OAuth token expired and no refresh token is available")}
 	}
 	request := map[string]string{"refresh_token": refresh}
 	var response platformTokenResponse
 	endpoint := strings.TrimRight(m.config.Snapshot().PlatformBaseURL, "/") + "/oauth/refresh"
 	if err := m.doJSON(ctx, http.MethodPost, endpoint, request, &response); err != nil {
-		return "", fmt.Errorf("refresh OAuth token: %w", err)
+		refreshErr := fmt.Errorf("refresh OAuth token: %w", err)
+		var responseErr *oauthBrokerResponseError
+		if errors.As(err, &responseErr) && (responseErr.status == http.StatusBadRequest || responseErr.status == http.StatusUnauthorized || responseErr.status == http.StatusForbidden) {
+			return "", &oauthCredentialsUnavailableError{err: refreshErr}
+		}
+		return "", refreshErr
 	}
 	if response.AccessToken == "" {
-		return "", errors.New("OAuth refresh returned an empty access token")
+		return "", &oauthCredentialsUnavailableError{err: errors.New("OAuth refresh returned an empty access token")}
 	}
 	if response.RefreshToken == "" {
 		response.RefreshToken = refresh
@@ -274,7 +300,7 @@ func (m *OAuthManager) doJSON(ctx context.Context, method, endpoint string, body
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("broker returned %d: %s", response.StatusCode, compactError(data))
+		return &oauthBrokerResponseError{status: response.StatusCode, body: compactError(data)}
 	}
 	if err := json.Unmarshal(data, result); err != nil {
 		return fmt.Errorf("decode broker response: %w", err)

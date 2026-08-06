@@ -624,6 +624,28 @@ func (s *Store) DeleteAccount(id string) error {
 	return os.ErrNotExist
 }
 
+func (s *Store) DeleteErrorAccounts() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]Account, 0, len(s.state.Accounts))
+	deleted := make([]string, 0)
+	for _, account := range s.state.Accounts {
+		if account.Status == "error" {
+			deleted = append(deleted, account.ID)
+			continue
+		}
+		kept = append(kept, account)
+	}
+	if len(deleted) == 0 {
+		return deleted, nil
+	}
+	s.state.Accounts = kept
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return deleted, nil
+}
+
 func (s *Store) CreateAPIKey(name string, allowedModels []string, expiresAt *time.Time) (APIKeyView, string, error) {
 	return s.CreateAPIKeyWithLimits(name, allowedModels, expiresAt, 0, 0)
 }
