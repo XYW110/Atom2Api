@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -286,7 +287,11 @@ func (a *API) HandleAccountClaim(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Coding Plan claim service is unavailable"})
 		return
 	}
-	result, err := a.planClaims.Claim(r.Context(), r.PathValue("id"), planClaimTriggerManual)
+	// Bound the external Coding Plan calls so the origin never goes silent past
+	// Cloudflare's timeout and turns the request into an upstream 502.
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	result, err := a.planClaims.Claim(ctx, r.PathValue("id"), planClaimTriggerManual)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeStoreError(w, err)
@@ -295,6 +300,9 @@ func (a *API) HandleAccountClaim(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if errors.Is(err, errPlanClaimInProgress) {
 			status = http.StatusConflict
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
 		}
 		writeJSON(w, status, errorResponse{Error: err.Error()})
 		return
