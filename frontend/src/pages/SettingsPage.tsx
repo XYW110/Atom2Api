@@ -316,12 +316,12 @@ export default function SettingsPage() {
           <div className="grid border-t border-zinc-100 md:grid-cols-2 md:divide-x md:divide-zinc-100">
             <div className="space-y-4 px-5 py-5 sm:px-6">
               <div><p className="text-sm font-medium text-zinc-800">清理请求审计记录</p><p className="mt-1 text-xs leading-5 text-zinc-500">永久删除超过保留天数的完整审计记录，不影响账号和密钥累计统计。</p></div>
-              <Input isRequired description="默认 30 天；保存设置后作为下次默认值" label="审计记录保留天数" labelPlacement="outside" max={maxAuditRetentionDays} min={1} radius="sm" step={1} type="number" value={String(form.audit_retention_days)} onValueChange={(value) => update('audit_retention_days', Number(value) || 0)} />
+              <Input isRequired description="默认 30 天；保存设置后作为下次默认值" label="审计记录保留天数" classNames={{ base: "!mt-8" }} labelPlacement="outside" max={maxAuditRetentionDays} min={1} radius="sm" step={1} type="number" value={String(form.audit_retention_days)} onValueChange={(value) => update('audit_retention_days', Number(value) || 0)} />
               <Button color="danger" isDisabled={loading} radius="sm" startContent={<Trash2 size={15} />} type="button" variant="flat" onPress={() => requestAuditCleanup('records')}>清理过期记录</Button>
             </div>
             <div className="space-y-4 border-t border-zinc-100 px-5 py-5 sm:px-6 md:border-t-0">
               <div><p className="text-sm font-medium text-zinc-800">清理记录的详细日志</p><p className="mt-1 text-xs leading-5 text-zinc-500">保留审计摘要，仅清除过期记录的正文、Header、错误及重试详情。</p></div>
-              <Input isRequired description="默认 30 天；保存设置后作为下次默认值" label="详细日志保留天数" labelPlacement="outside" max={maxAuditRetentionDays} min={1} radius="sm" step={1} type="number" value={String(form.audit_detail_retention_days)} onValueChange={(value) => update('audit_detail_retention_days', Number(value) || 0)} />
+              <Input isRequired description="默认 30 天；保存设置后作为下次默认值" label="详细日志保留天数" classNames={{ base: "!mt-8" }} labelPlacement="outside" max={maxAuditRetentionDays} min={1} radius="sm" step={1} type="number" value={String(form.audit_detail_retention_days)} onValueChange={(value) => update('audit_detail_retention_days', Number(value) || 0)} />
               <Button color="danger" isDisabled={loading} radius="sm" startContent={<Trash2 size={15} />} type="button" variant="flat" onPress={() => requestAuditCleanup('details')}>清理过期详情</Button>
             </div>
           </div>
