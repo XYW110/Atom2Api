@@ -209,9 +209,11 @@ func (a Account) View() AccountView {
 	if a.ClaimSchedule != nil {
 		claimSchedule = *a.ClaimSchedule
 	}
+	models := make([]CodingPlanModel, len(a.Models))
+	copy(models, a.Models)
 	view := AccountView{
 		ID: a.ID, Name: a.Name, Note: a.Note, Status: a.Status, Enabled: a.Enabled, User: a.User,
-		Plan: a.Plan, Models: append([]CodingPlanModel(nil), a.Models...), ProviderUsage: a.ProviderUsage,
+		Plan: a.Plan, Models: models, ProviderUsage: a.ProviderUsage,
 		ClaimSchedule: claimSchedule,
 		RequestCount:  a.RequestCount, InputTokens: a.InputTokens, OutputTokens: a.OutputTokens,
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastSyncAt: a.LastSyncAt,

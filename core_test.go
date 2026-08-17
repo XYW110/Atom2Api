@@ -73,6 +73,27 @@ func addTestAccount(t *testing.T, store *Store, upstreamURL string) AccountView 
 	return view
 }
 
+func TestAccountViewSerializesNilModelsAsEmptyArray(t *testing.T) {
+	view := (Account{}).View()
+	if view.Models == nil {
+		t.Fatal("account view models is nil")
+	}
+
+	data, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal account view: %v", err)
+	}
+	var payload struct {
+		Models json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode account view: %v", err)
+	}
+	if string(payload.Models) != "[]" {
+		t.Fatalf("models JSON = %s, want []", payload.Models)
+	}
+}
+
 func TestStoreEncryptsOAuthCredentialsAndHashesAPIKeys(t *testing.T) {
 	_, store := newTestStore(t)
 	view := addTestAccount(t, store, "https://example.com")
