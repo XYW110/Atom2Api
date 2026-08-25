@@ -60,3 +60,72 @@ func TestApplySystemPromptRejectsInvalidInstructions(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestNormalizeChatMessagesMovesSystemToFront(t *testing.T) {
+	messages := []any{
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "assistant", "content": "hi"},
+		map[string]any{"role": "system", "content": "be brief"},
+		map[string]any{"role": "tool", "content": "ok", "tool_call_id": "call-1"},
+	}
+	normalized := normalizeChatMessages(messages)
+	if len(normalized) != 4 {
+		t.Fatalf("len = %d", len(normalized))
+	}
+	first := normalized[0].(map[string]any)
+	if first["role"] != "system" || first["content"] != "be brief" {
+		t.Fatalf("first = %#v", first)
+	}
+	if normalized[1].(map[string]any)["role"] != "user" || normalized[2].(map[string]any)["role"] != "assistant" || normalized[3].(map[string]any)["role"] != "tool" {
+		t.Fatalf("order = %#v", normalized)
+	}
+}
+
+func TestNormalizeChatMessagesMergesSystemAndDeveloper(t *testing.T) {
+	messages := []any{
+		map[string]any{"role": "developer", "content": "dev rule"},
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "system", "content": "sys rule"},
+	}
+	normalized := normalizeChatMessages(messages)
+	if len(normalized) != 2 {
+		t.Fatalf("len = %d, messages = %#v", len(normalized), normalized)
+	}
+	first := normalized[0].(map[string]any)
+	if first["role"] != "system" || first["content"] != "dev rule\n\nsys rule" {
+		t.Fatalf("merged = %#v", first)
+	}
+	if normalized[1].(map[string]any)["content"] != "hello" {
+		t.Fatalf("rest = %#v", normalized[1])
+	}
+}
+
+func TestNormalizeChatMessagesLeavesPlainChatUnchanged(t *testing.T) {
+	messages := []any{
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "assistant", "content": "hi"},
+	}
+	normalized := normalizeChatMessages(messages)
+	if len(normalized) != 2 || normalized[0].(map[string]any)["role"] != "user" {
+		t.Fatalf("unchanged = %#v", normalized)
+	}
+}
+
+func TestResponsesCompatMovesLateDeveloperToFront(t *testing.T) {
+	payload := map[string]json.RawMessage{
+		"model": json.RawMessage(`"qwen3.8-27b"`),
+		"input": json.RawMessage(`[{"role":"user","content":"hello"},{"role":"developer","content":"stay concise"}]`),
+	}
+	body, _, err := responsesRequestToChat(payload)
+	if err != nil {
+		t.Fatalf("responsesRequestToChat: %v", err)
+	}
+	var chat map[string]any
+	if err := json.Unmarshal(body, &chat); err != nil {
+		t.Fatalf("decode chat: %v", err)
+	}
+	messages := chat["messages"].([]any)
+	if len(messages) != 2 || messages[0].(map[string]any)["role"] != "system" || messages[0].(map[string]any)["content"] != "stay concise" || messages[1].(map[string]any)["content"] != "hello" {
+		t.Fatalf("messages = %#v", messages)
+	}
+}

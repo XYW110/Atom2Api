@@ -66,6 +66,7 @@ func responsesRequestToChat(payload map[string]json.RawMessage) ([]byte, *respon
 	if instructions, ok := request["instructions"].(string); ok && strings.TrimSpace(instructions) != "" {
 		messages = append([]any{map[string]any{"role": "system", "content": instructions}}, messages...)
 	}
+	messages = normalizeChatMessages(messages)
 	if len(messages) == 0 {
 		return nil, nil, errors.New("input must contain at least one message")
 	}

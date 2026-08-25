@@ -235,6 +235,13 @@ func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request, key APIKey
 			return
 		}
 	}
+	if r.URL.Path == "/v1/chat/completions" {
+		if err := normalizeChatCompletionsPayload(payload); err != nil {
+			audit.Error = err.Error()
+			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", audit.Error)
+			return
+		}
+	}
 	payload["model"] = modelJSON
 	streaming := false
 	if raw := payload["stream"]; raw != nil {
@@ -402,6 +409,60 @@ func applySystemPrompt(payload map[string]json.RawMessage, path, model, template
 		payload["instructions"] = encoded
 	}
 	return nil
+}
+
+func normalizeChatCompletionsPayload(payload map[string]json.RawMessage) error {
+	raw := payload["messages"]
+	if raw == nil {
+		return nil
+	}
+	var messages []any
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return errors.New("messages must be an array")
+	}
+	normalized := normalizeChatMessages(messages)
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return errors.New("could not encode chat messages")
+	}
+	payload["messages"] = encoded
+	return nil
+}
+
+func normalizeChatMessages(messages []any) []any {
+	systemContents := make([]any, 0)
+	rest := make([]any, 0, len(messages))
+	for _, raw := range messages {
+		message, ok := raw.(map[string]any)
+		if !ok {
+			rest = append(rest, raw)
+			continue
+		}
+		role, _ := message["role"].(string)
+		if role != "system" && role != "developer" {
+			rest = append(rest, raw)
+			continue
+		}
+		if content, exists := message["content"]; exists {
+			systemContents = append(systemContents, content)
+		}
+	}
+	if len(systemContents) == 0 {
+		return messages
+	}
+	merged := map[string]any{"role": "system"}
+	if len(systemContents) == 1 {
+		merged["content"] = systemContents[0]
+	} else {
+		parts := make([]string, 0, len(systemContents))
+		for _, content := range systemContents {
+			if text := strings.TrimSpace(stringifyContent(content)); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		merged["content"] = strings.Join(parts, "\n\n")
+	}
+	return append([]any{merged}, rest...)
 }
 
 func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path string, body []byte, streaming bool, requestID string) (*http.Request, *http.Response, error) {
