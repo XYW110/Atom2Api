@@ -302,9 +302,6 @@ func modelFamily(upstream string) string {
 }
 
 func accountEligibleForModel(account Account, upstream string) bool {
-	if accountPlanTier(account) == "lite" && modelFamily(upstream) != "deepseek" {
-		return false
-	}
 	if modelFamily(upstream) == "glm" {
 		tier := accountPlanTier(account)
 		return tier == "pro" || tier == "max"

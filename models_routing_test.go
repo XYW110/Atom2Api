@@ -131,6 +131,31 @@ func TestDeepSeekFallsBackFromExhaustedLiteToPro(t *testing.T) {
 	}
 }
 
+func TestLiteCanUseQwenButNotGLM(t *testing.T) {
+	_, store := newTestStore(t)
+	addRoutingAccount(t, store, "lite-qwen", "CodingPlan Lite", "qwen3.8-27b", "GLM-5.2")
+	if err := store.SetModelSetting(ModelSetting{Upstream: "qwen3.8-27b", Alias: "qwen3.8-27b", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetModelSetting(ModelSetting{Upstream: "GLM-5.2", Alias: "glm", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	router := NewModelRouter(store)
+	key := APIKey{ID: "key-lite-qwen"}
+
+	route, err := router.Resolve("qwen3.8-27b", key)
+	if err != nil {
+		t.Fatalf("Lite should resolve qwen3.8-27b: %v", err)
+	}
+	if route.Account.ID != "lite-qwen" {
+		t.Fatalf("qwen account = %q, want lite-qwen", route.Account.ID)
+	}
+
+	if _, err := router.Resolve("glm", key); err == nil {
+		t.Fatal("Lite should not resolve GLM-5.2")
+	}
+}
+
 func TestRoundRobinRoutingDoesNotReuseFillBinding(t *testing.T) {
 	_, store := newTestStore(t)
 	addRoutingAccount(t, store, "account-a", "CodingPlan Pro", "model-a")

@@ -45,7 +45,7 @@ Each API key can choose **Fill** or **Round robin** in Key Management:
 - **Fill** keeps a key on one account for each model and persists the binding. It switches only when the account is disabled, invalid, unavailable for that model, or its five-hour quota is exhausted. Different keys are assigned different accounts when possible, and share an account only when there are not enough eligible accounts.
 - **Round robin** randomly selects an eligible account for every request and does not use bindings.
 
-Plan-aware routing keeps Lite accounts on DeepSeek. DeepSeek prefers non-exhausted Lite accounts and falls back to Pro/Max when Lite is unavailable. GLM-5.2 is restricted to Pro, Pro trial, and Max accounts. Fill bindings and the selected account's five-hour call quota are visible in Key Management.
+Plan-aware routing prefers non-exhausted Lite accounts for DeepSeek and falls back to Pro/Max when Lite is unavailable. GLM-5.2 is restricted to Pro, Pro trial, and Max accounts. Other models follow the upstream Coding Plan catalog, including Qwen on Lite. Fill bindings and the selected account's five-hour call quota are visible in Key Management.
 
 Account management also provides protocol probing for every available model on an account. The probe checks Chat Completions and native Responses separately. It uses normal JSON requests by default and can optionally validate streaming SSE completion events.
 
