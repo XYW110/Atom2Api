@@ -21,7 +21,7 @@ import (
 
 const (
 	defaultConfigPath       = "config.json"
-	defaultUserAgent        = "atomcode/5.0.2"
+	defaultUserAgent        = "atomcode/5.0.8"
 	defaultListenAddress    = ":8080"
 	defaultDataPath         = "data/atom2api.db"
 	defaultAdminPassword    = "atom2api"

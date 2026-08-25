@@ -162,7 +162,7 @@ curl http://localhost:8080/v1/chat/completions \
   "user_id": "...",
   "timestamp_unix": 0,
   "nonce": "base64url-nonce",
-  "client_version": "5.0.2"
+  "client_version": "5.0.8"
 }
 ```
 

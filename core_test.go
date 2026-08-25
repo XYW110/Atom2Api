@@ -462,6 +462,16 @@ func TestAtomGitSigningMatchesIndependentFixture(t *testing.T) {
 	}
 }
 
+func TestAtomCodeSessionIDLooksLikeUUID(t *testing.T) {
+	id := atomCodeSessionID()
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		t.Fatalf("session id = %q", id)
+	}
+	if id[14] != '4' {
+		t.Fatalf("session id version nibble = %q, want 4", id[14])
+	}
+}
+
 func TestExpiredQuotaWindowReturnsToRoutingPool(t *testing.T) {
 	now := time.Now().UTC()
 	status := CodingPlanStatus{RateLimitWindows: []RateLimitWindow{{

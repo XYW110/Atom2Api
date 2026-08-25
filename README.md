@@ -162,7 +162,7 @@ If the upstream protocol or key changes, configure `signer_url` in the settings 
   "user_id": "...",
   "timestamp_unix": 0,
   "nonce": "base64url-nonce",
-  "client_version": "5.0.2"
+  "client_version": "5.0.8"
 }
 ```
 

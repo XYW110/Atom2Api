@@ -1,5 +1,5 @@
 {
-  "user_agent": "atomcode/5.0.2",
+  "user_agent": "atomcode/5.0.8",
   "listen_address": ":8080",
   "data_path": "data/atom2api.db",
   "admin_password": "change-this-password",

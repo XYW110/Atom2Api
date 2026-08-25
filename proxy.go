@@ -421,6 +421,7 @@ func (p *Proxy) doUpstreamRequest(ctx context.Context, route ModelRoute, path st
 	}
 	request.Header.Set("User-Agent", p.config.Snapshot().UserAgent)
 	request.Header.Set("X-Request-Id", requestID)
+	request.Header.Set("X-AtomCode-Session-Id", atomCodeSessionID())
 	if err := p.applySignature(ctx, request, body, route); err != nil {
 		return request, nil, &upstreamRequestError{code: "signing_error", err: fmt.Errorf("sign upstream request: %w", err)}
 	}
@@ -678,6 +679,18 @@ func signAtomGitRequest(method, path string, body []byte, oauthToken, userID, cl
 		"X-AtomCode-Alg":   "1",
 		"X-AtomCode-Ver":   clientVersion,
 	}, nil
+}
+
+func atomCodeSessionID() string {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("session-%d", time.Now().UnixNano())))
+		copy(raw, sum[:16])
+	}
+	raw[6] = raw[6]&0x0f | 0x40
+	raw[8] = raw[8]&0x3f | 0x80
+	encoded := hex.EncodeToString(raw)
+	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:]
 }
 
 func extractUsage(data []byte) tokenUsage {
